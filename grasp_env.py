@@ -35,7 +35,9 @@ class GraspEnv(gym.Env):
         self.env.launch()
         self.task = self.env.get_task(task_class)
 
-        _, obs = self.task.reset()
+        desc, obs = self.task.reset()
+        
+        print(desc)
 
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(self.env.action_size,))
@@ -82,7 +84,7 @@ class GraspEnv(gym.Env):
                      obs.gripper_pose, 
                     #  obs.gripper_joint_positions,
                     #  obs.gripper_touch_forces, 
-                    #  obs.task_low_dim_state
+                     obs.task_low_dim_state,
                     ]:
             if data is not None:
                 low_dim_data.append(data)
