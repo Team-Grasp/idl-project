@@ -66,10 +66,11 @@ if __name__ == "__main__":
     print(args)
     
     eval_freq = 300
-    n_steps = 100
-    total_timesteps = 10 * n_steps
-    n_epochs = 10
+    n_steps = 400
+    total_timesteps = 200 * n_steps
+    n_epochs = 20
     batch_size = 64
+    save_freq = 10
 
     # TaskEnvironment
     # env = gym.make('reach_target-state-v0', render_mode="human")
@@ -88,7 +89,8 @@ if __name__ == "__main__":
     # import ipdb; ipdb.set_trace()
 
     save_path = "models/%d" % timestamp
-    callback = ProgressCallback(eval_env=env, save_freq=1, render_freq=1, save_path=save_path, deterministic=True, verbose=1)
+    callback = ProgressCallback(eval_env=env, save_freq=save_freq, render_freq=1, \
+            save_path=save_path, deterministic=True, verbose=1)
 
     if model_path != "":
         print("Loading Existing model: %s" % model_path)
