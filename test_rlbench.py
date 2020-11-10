@@ -65,8 +65,8 @@ if __name__ == "__main__":
 
     agent = Agent(env.action_size)
 
-    training_steps = 200
-    episode_length = 200
+    training_steps = 500
+    episode_length = 500
     obs = None
     full_pos = []
     for i in range(training_steps):
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         print("Action:")
         print(action)
         obs, reward, terminate = task.step(action)
-        full_pos.append(obs.joint_positions[:3])
+        full_pos.append(obs.gripper_pose[:3])
 
     full_pos = np.vstack(full_pos)
     np.save("full_pos", full_pos)
