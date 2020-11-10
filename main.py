@@ -65,15 +65,19 @@ if __name__ == "__main__":
     timestamp = int(time.time())
     print(args)
     
-    total_timesteps = 10000
     eval_freq = 300
-    n_steps = 2048
+    n_steps = 100
+    total_timesteps = 10 * n_steps
     n_epochs = 10
     batch_size = 64
 
     # TaskEnvironment
     # env = gym.make('reach_target-state-v0', render_mode="human")
-    env = GraspEnv(task_class=ReachTarget)
+    if render:
+        env = GraspEnv(task_class=ReachTarget, render_mode="human")
+    else:
+        env = GraspEnv(task_class=ReachTarget, render_mode="rgb_array")
+
     # agent
     model = PPO(MlpPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
         learning_rate=lr, verbose=1, tensorboard_log="runs/")
@@ -84,7 +88,7 @@ if __name__ == "__main__":
     # import ipdb; ipdb.set_trace()
 
     save_path = "models/%d" % timestamp
-    callback = ProgressCallback(eval_env=env, save_freq=500, render_freq=-1, save_path=save_path, deterministic=True, verbose=1)
+    callback = ProgressCallback(eval_env=env, save_freq=1, render_freq=1, save_path=save_path, deterministic=True, verbose=1)
 
     if model_path != "":
         print("Loading Existing model: %s" % model_path)
@@ -92,13 +96,14 @@ if __name__ == "__main__":
 
     if is_train:
         model.learn(total_timesteps=total_timesteps, eval_freq=eval_freq, eval_log_path="./evals/", \
-            callback=callback) 
+            callback=callback
+            ) 
         model.save("models/weights_%d" % timestamp)
 
     else:
 
         for i in range(2):
-            run_episode(model, env, max_iters=100)
+            run_episode(model, env, max_iters=200)
 
     env.close()
 
