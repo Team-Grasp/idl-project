@@ -5,7 +5,7 @@ def parse_arguments():
 
     # Hyperparameters
     parser.add_argument('--num_episodes', dest='num_episodes', type=int,
-                        default=50000, help="Number of episodes to train on.")
+                        default=10000, help="Number of episodes to train on.")
     parser.add_argument('--lr', dest='lr', type=float,
                         default=3e-4, help="The learning rate.")
 
