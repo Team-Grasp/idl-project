@@ -84,7 +84,7 @@ class GraspEnv(gym.Env):
                      obs.gripper_pose, 
                     #  obs.gripper_joint_positions,
                     #  obs.gripper_touch_forces, 
-                     obs.task_low_dim_state,
+                     obs.task_low_dim_state, # target state
                     ]:
             if data is not None:
                 low_dim_data.append(data)

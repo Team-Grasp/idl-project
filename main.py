@@ -3,7 +3,6 @@ import time
 import datetime
 
 from rlbench.action_modes import ArmActionMode
-from rlbench.tasks import ReachTarget
 
 from stable_baselines3 import PPO
 from stable_baselines3.ppo.policies import MlpPolicy
@@ -12,6 +11,7 @@ from utils import parse_arguments
 from progress_callback import ProgressCallback
 
 from grasp_env import GraspEnv
+from reach_task import ReachTargetCustom
 
 def evaluate(model, env, num_episodes=100, max_iters=500):
     """
@@ -75,16 +75,16 @@ if __name__ == "__main__":
     # TaskEnvironment
     # env = gym.make('reach_target-state-v0', render_mode="human")
     if render:
-        env = GraspEnv(task_class=ReachTarget, render_mode="human")
+        env = GraspEnv(task_class=ReachTargetCustom, render_mode="human")
     else:
-        env = GraspEnv(task_class=ReachTarget, render_mode="rgb_array")
+        env = GraspEnv(task_class=ReachTargetCustom, render_mode="rgb_array")
 
     # agent
     model = PPO(MlpPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
         learning_rate=lr, verbose=1, tensorboard_log="runs/")
     
     # Run one episode
-    # run_episode(model, env, max_iters=10000, render=True)
+    run_episode(model, env, max_iters=100, render=True)
 
     # import ipdb; ipdb.set_trace()
 
