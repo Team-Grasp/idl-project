@@ -97,7 +97,7 @@ if __name__ == "__main__":
         model.load(model_path)
 
     if is_train:
-        model.learn(total_timesteps=total_timesteps, eval_freq=eval_freq, eval_log_path="./evals/", \
+        model.learn(total_timesteps=total_timesteps, eval_freq=eval_freq, eval_env=env, eval_log_path="./evals/", \
             callback=callback
             ) 
         model.save("models/weights_%d" % timestamp)
