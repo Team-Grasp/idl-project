@@ -68,7 +68,7 @@ if __name__ == "__main__":
     eval_freq = 300
     n_steps = 400
     total_timesteps = 200 * n_steps
-    n_epochs = 20
+    n_epochs = 2
     batch_size = 64
     save_freq = 10
 
@@ -84,7 +84,7 @@ if __name__ == "__main__":
         learning_rate=lr, verbose=1, tensorboard_log="runs/")
     
     # Run one episode
-    run_episode(model, env, max_iters=100, render=True)
+    # run_episode(model, env, max_iters=100, render=True)
 
     # import ipdb; ipdb.set_trace()
 
@@ -97,9 +97,7 @@ if __name__ == "__main__":
         model.load(model_path)
 
     if is_train:
-        model.learn(total_timesteps=total_timesteps, eval_freq=eval_freq, eval_env=env, eval_log_path="./evals/", \
-            callback=callback
-            ) 
+        model.learn(total_timesteps=total_timesteps, callback=callback) 
         model.save("models/weights_%d" % timestamp)
 
     else:
