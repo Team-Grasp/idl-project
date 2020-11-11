@@ -77,7 +77,7 @@ if __name__ == "__main__":
     if render:
         env = GraspEnv(task_class=ReachTargetCustom, render_mode="human")
     else:
-        env = GraspEnv(task_class=ReachTargetCustom, render_mode="rgb_array")
+        env = GraspEnv(task_class=ReachTargetCustom)
 
     # agent
     model = PPO(MlpPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
