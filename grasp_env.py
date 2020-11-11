@@ -76,12 +76,13 @@ class GraspEnv(gym.Env):
         :return: 1D array of observations.
         """
 
-        low_dim_data = [] if obs.gripper_open is None else [[obs.gripper_open]]
+        # low_dim_data = [] if obs.gripper_open is None else [[obs.gripper_open]]
+        low_dim_data = []
         for data in [
                     #  obs.joint_velocities, 
                     #  obs.joint_positions,
                     #  obs.joint_forces,
-                     obs.gripper_pose, 
+                     obs.gripper_pose[0:3], 
                     #  obs.gripper_joint_positions,
                     #  obs.gripper_touch_forces, 
                      obs.task_low_dim_state, # target state

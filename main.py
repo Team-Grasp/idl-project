@@ -53,6 +53,13 @@ def run_episode(model, env, max_iters, render=False):
     return episode_rewards
 
 
+class CustomPolicy(MlpPolicy):
+    def __init__(self, *args, **kwargs):
+        super(CustomPolicy, self).__init__(*args, **kwargs,
+                net_arch=[64, 64, dict(pi=[64, 64, 64], vf=[64, 64, 64])] )
+
+
+
 if __name__ == "__main__":
     
     # Args
@@ -80,7 +87,7 @@ if __name__ == "__main__":
         env = GraspEnv(task_class=ReachTargetCustom)
 
     # agent
-    model = PPO(MlpPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
+    model = PPO(CustomPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
         learning_rate=lr, verbose=1, tensorboard_log="runs/")
     
     # Run one episode
@@ -94,7 +101,7 @@ if __name__ == "__main__":
 
     if model_path != "":
         print("Loading Existing model: %s" % model_path)
-        model.load(model_path)
+        model = model.load(model_path)
 
     if is_train:
         model.learn(total_timesteps=total_timesteps, callback=callback) 
