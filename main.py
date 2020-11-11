@@ -4,7 +4,7 @@ import datetime
 
 from rlbench.action_modes import ArmActionMode
 
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, HER
 from stable_baselines3.ppo.policies import MlpPolicy
 from stable_baselines3.common.evaluation import evaluate_policy
 from utils import parse_arguments
@@ -56,7 +56,7 @@ def run_episode(model, env, max_iters, render=False):
 class CustomPolicy(MlpPolicy):
     def __init__(self, *args, **kwargs):
         super(CustomPolicy, self).__init__(*args, **kwargs,
-                net_arch=[64, 64, dict(pi=[64, 64, 64], vf=[64, 64, 64])] )
+                net_arch=[64, 64, dict(pi=[64, 64], vf=[64, 64])] )
 
 
 
@@ -73,22 +73,23 @@ if __name__ == "__main__":
     print(args)
     
     eval_freq = 300
-    n_steps = 400
-    total_timesteps = 200 * n_steps
-    n_epochs = 2
-    batch_size = 64
+    n_steps = 200
+    total_timesteps = 400 * n_steps
+    n_epochs = 1
+    batch_size = 128
     save_freq = 10
 
     # TaskEnvironment
     # env = gym.make('reach_target-state-v0', render_mode="human")
+    act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     if render:
-        env = GraspEnv(task_class=ReachTargetCustom, render_mode="human")
+        env = GraspEnv(task_class=ReachTargetCustom, render_mode="human", act_mode=act_mode)
     else:
-        env = GraspEnv(task_class=ReachTargetCustom)
+        env = GraspEnv(task_class=ReachTargetCustom, act_mode=act_mode)
 
     # agent
     model = PPO(CustomPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
-        learning_rate=lr, verbose=1, tensorboard_log="runs/")
+        learning_rate=lr, verbose=1, tensorboard_log="runs/", vf_coef=0.5, ent_coef=0.01)
     
     # Run one episode
     # run_episode(model, env, max_iters=100, render=True)
@@ -108,7 +109,6 @@ if __name__ == "__main__":
         model.save("models/weights_%d" % timestamp)
 
     else:
-
         for i in range(2):
             run_episode(model, env, max_iters=200)
 

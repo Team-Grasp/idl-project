@@ -10,11 +10,21 @@ from rlbench.action_modes import ArmActionMode, ActionMode
 from rlbench.observation_config import ObservationConfig
 import numpy as np
 
+import pyrep
+
 
 class GraspEnv(gym.Env):
     """An gym wrapper for Team Grasp."""
 
     metadata = {'render.modes': ['human', 'rgb_array']}
+    ee_control_types = set([
+        ArmActionMode.ABS_EE_POSE_WORLD_FRAME, 
+        ArmActionMode.DELTA_EE_POSE_WORLD_FRAME,
+        ArmActionMode.ABS_EE_POSE_PLAN_WORLD_FRAME,
+        ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME,
+        ArmActionMode.EE_POSE_EE_FRAME,
+        ArmActionMode.EE_POSE_PLAN_EE_FRAME,
+    ])
 
     def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
                  render_mode: Union[None, str] = None):
@@ -121,8 +131,42 @@ class GraspEnv(gym.Env):
         del descriptions  # Not used.
         return self._extract_obs(obs)
 
+    def normalize_action(self, action: np.ndarray):
+        """
+        Normalizes desired orientation or change in orientation of EE. Also normalizes change in position if
+        control type is DELTA_EE. Only should be called if 
+        action controls EE pose or change in pose. Actions have the following form:
+        [x, y, z, qx, qy, qz, qw, gripper]
+        """
+        assert(action.shape[0] == 8)
+        [ax, ay, az, aqx, aqy, aqz, aqw, gripper] = action
+        x, y, z, qx, qy, qz, qw = self.task._robot.arm.get_tip().get_pose()
+
+        new_pos = np.array([x, y, z]) + np.array([ax, ay, az]) / 100
+        # new_pos = np.array([ax, ay, az]) / 100
+
+        new_quat = np.array([0, 0, 0, 1.0])
+        # new_quat = np.array([qx, qy, qz, qw])
+        # new_quat /= np.linalg.norm(new_quat)
+        
+
+        action = np.concatenate([new_pos, new_quat, [gripper]])
+        return action
+
     def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
-        obs, reward, terminate = self.task.step(action)
+        if self.task._action_mode.arm in self.ee_control_types:
+            action = self.normalize_action(action)
+
+        try:
+            obs, reward, terminate = self.task.step(action)
+        except pyrep.errors.ConfigurationPathError:
+            obs = self.task._scene.get_observation()
+            _, terminate = self.task._task.success()
+            reward = self.task._task.reward()
+            # scale reward by change in translation/rotation
+        # except rlbench.task_environment.InvalidActionError:
+            
+
         return self._extract_obs(obs), reward, terminate, {}
 
     def close(self) -> None:
