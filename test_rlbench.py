@@ -7,84 +7,59 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
-# import numpy as np
-# import time
-# DO NOT IMPORT THIS HERE!!! CAUSES WEIRD QT ERROR
-# from stable_baselines3 import PPO
-
-# from stable_baselines3.common.evaluation import evaluate_policy
-# from stable_baselines3.ppo.policies import MlpPolicy
-
-# from agent import Agent
-# from utils import parse_arguments
-
+from grasp_env import GraspEnv
+from reach_task import ReachTargetCustom
 
 class Agent(object):
     def __init__(self, action_size):
         self.action_size = action_size
 
-    def act(self, obs):
-        # arm = np.random.normal(0.0, 0.1, size=(self.action_size - 1,))
-        print("joint pos")
-        print(obs.joint_positions)
-        print("gripper pose:")
-        print(obs.gripper_pose)
+    def act(self, obs: np.ndarray):
+        cur_pos = obs[:3]
+        target_pos = obs[3:]
+        vec = target_pos - cur_pos
+        vec = vec / np.linalg.norm(vec)
         arm = np.zeros(self.action_size-1)
-        arm[0] = 5 * math.pi / 180.0
-        # arm[0:3] = [0, 0, 0]
-        # arm[3:] = [0, 0, 0, 1]
+        # arm[0] = 5 * math.pi / 180.0
+        arm[0:3] = vec * 0.1
+        arm[3:] = [0, 0, 0, 1]
         gripper = [1.0]  # Always open
-        print()
         return np.concatenate([arm, gripper], axis=-1)
 
 if __name__ == "__main__":
     # import gym
     # import rlbench.gym
-    full_pos = np.load("full_pos.npy")
-    plt.plot(full_pos[:, 0], label="x")
-    plt.plot(full_pos[:, 1], label="y")
-    plt.plot(full_pos[:, 2], label="z")
-    plt.legend()
-    plt.show()
-    exit()
+    # full_pos = np.load("full_pos.npy")
+    # plt.plot(full_pos[:, 0], label="x")
+    # plt.plot(full_pos[:, 1], label="y")
+    # plt.plot(full_pos[:, 2], label="z")
+    # plt.legend()
+    # plt.show()
+    # exit()
 
     # temp_env = gym.make('reach_target-state-v0')
     # print(temp_env.action_space)
-    
-    obs_config = ObservationConfig()
-    obs_config.set_all(False)
-    obs_config.joint_positions = True
-    obs_config.gripper_pose = True
 
-    action_mode = ActionMode(ArmActionMode.ABS_JOINT_VELOCITY)
-    env = Environment(
-        action_mode, obs_config=obs_config, headless=False)
-    # env.launch()  # not needed, called by env.get_task()
+    act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
+    env = GraspEnv(task_class=ReachTargetCustom, render_mode="human", act_mode=act_mode)
+    agent = Agent(env.action_space.shape[0])
 
-    task = env.get_task(ReachTarget)
-
-    agent = Agent(env.action_size)
-
-    training_steps = 500
-    episode_length = 500
+    iterations = 5
+    max_steps = 500
     obs = None
     full_pos = []
-    for i in range(training_steps):
-        if i % episode_length == 0:
-            print('Reset Episode')
-            descriptions, obs = task.reset()
-            print(descriptions)
-        action = agent.act(obs)
-        print(task.get_observation().joint_positions)
-        print("Action:")
-        print(action)
-        obs, reward, terminate = task.step(action)
-        full_pos.append(obs.gripper_pose[:3])
+    for i in range(iterations):
+        obs = env.reset()
+        for j in range(max_steps):
+            action = agent.act(obs)
+            obs, reward, terminate, _ = env.step(action)
+            full_pos.append(obs)
+            if terminate: break
 
     full_pos = np.vstack(full_pos)
     np.save("full_pos", full_pos)
 
-    print('Done')
-    env.shutdown()
+    env.close()
+
 
 

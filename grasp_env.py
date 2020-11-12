@@ -145,16 +145,35 @@ class GraspEnv(gym.Env):
         [ax, ay, az, aqx, aqy, aqz, aqw, gripper] = action
         x, y, z, qx, qy, qz, qw = self.task._robot.arm.get_tip().get_pose()
 
-        # new_pos = np.array([x, y, z]) + np.array([ax, ay, az]) / 100
-        new_pos = np.array([ax, ay, az]) / 100
+        new_pos = np.array([x, y, z]) + np.array([ax, ay, az]) / 50
+        # new_pos = np.array([ax, ay, az]) / 100
 
-        new_quat = np.array([0, 0, 0, 1.0])
-        # new_quat = np.array([qx, qy, qz, qw])
+        # new_quat = np.array([0, 0, 0, 1.0])
+        new_quat = np.array([qx, qy, qz, qw])
         # new_quat /= np.linalg.norm(new_quat)
         
 
         action = np.concatenate([new_pos, new_quat, [gripper]])
         return action
+
+    def manual_step(self, action):
+        # print("Before action")
+        # print(self.task._robot.arm.get_tip().get_pose())
+        # print("Desired Pose:")
+        # print(action)
+        # print("After action:")
+        self.task._robot.arm.get_tip().set_pose(action[:-1])
+        # print(self.task._robot.arm.get_tip().get_pose())
+        # print()
+        success, terminate = self.task._task.success()
+        # target_pos = self.task._task.target.get_position()
+        task_reward = self.task._task.reward()
+        obs = self._extract_obs(self.task._scene.get_observation())
+        # print("Manual obs:")
+        # print(obs)
+        # print("Actual obs:")
+        # print(self._extract_obs(self.task._scene.get_observation()))
+        return obs, task_reward, terminate
 
     def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
         self.n_steps += 1
@@ -163,22 +182,31 @@ class GraspEnv(gym.Env):
             action = self.normalize_action(action)
             
         try:
-            obs, reward, terminate = self.task.step(action)
-        except pyrep.errors.ConfigurationPathError:
-            obs = self.task._scene.get_observation()
-            _, terminate = self.task._task.success()
-            reward = self.task._task.reward()
-            # scale reward by change in translation/rotation
-        except rlbench.task_environment.InvalidActionError:
-            obs = self.task._scene.get_observation()
-            _, terminate = self.task._task.success()
-            reward = self.task._task.reward()
-            # terminate = True
-            # reward = -10
-            print("Out of bounds action, terminating at %d" % self.n_steps)
-            self.n_steps = 0
+            # self.task._robot.arm.solve_ik(
+            #     action[:3], quaternion=action[3:-1], relative_to=None)
+            # print("manually setting action")
+            obs, reward, terminate = self.manual_step(action)
+            # self.task._scene.step()
+            return obs, reward, terminate, {}
+        except Exception as e:
+            print(e)
+            
 
-        return self._extract_obs(obs), reward, terminate, {}
+        # except pyrep.errors.ConfigurationPathError:
+        #     obs = self.task._scene.get_observation()
+        #     _, terminate = self.task._task.success()
+        #     reward = self.task._task.reward()
+        #     # scale reward by change in translation/rotation
+        # except rlbench.task_environment.InvalidActionError:
+            obs = self.task._scene.get_observation()
+            _, terminate = self.task._task.success()
+            reward = self.task._task.reward()
+        #     # terminate = True
+        #     # reward = -10
+        #     print("Out of bounds action, terminating at %d" % self.n_steps)
+        #     self.n_steps = 0
+
+            return self._extract_obs(obs), reward, terminate, {}
 
     def close(self) -> None:
         self.env.shutdown()
