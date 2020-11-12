@@ -55,8 +55,8 @@ def run_episode(model, env, max_iters, render=False):
 
 class CustomPolicy(MlpPolicy):
     def __init__(self, *args, **kwargs):
-        super(CustomPolicy, self).__init__(*args, **kwargs,
-                net_arch=[64, 64, dict(pi=[64, 64], vf=[64, 64])] )
+        super(CustomPolicy, self).__init__(*args, **kwargs, \
+                net_arch=[16, dict(pi=[64, 64], vf=[64, 64])] )
 
 
 

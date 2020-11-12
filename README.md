@@ -19,8 +19,24 @@ $ git clone https://github.com/Team-Grasp/idl-project.git
 ```
 
 # Common installation issues
-1. Problem: I/O iperation on a closed file.
-Solution: Add the following line to the logger.py file in the installation. Alternatively you can change the line and install the library locally. 
+1. Problem: 
+    ```sh
+    Traceback (most recent call last):
+    File "main.py", line 108, in <module>
+        model.learn(total_timesteps=total_timesteps, callback=callback) 
+    File "/home/deval/anaconda3/envs/drl/lib/python3.7/site-packages/stable_baselines3/ppo/ppo.py", line 265, in learn
+        reset_num_timesteps=reset_num_timesteps,
+    File "/home/deval/anaconda3/envs/drl/lib/python3.7/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 240, in learn
+        logger.dump(step=self.num_timesteps)
+    File "/home/deval/anaconda3/envs/drl/lib/python3.7/site-packages/stable_baselines3/common/logger.py", line 379, in dump
+        Logger.CURRENT.dump(step)
+    File "/home/deval/anaconda3/envs/drl/lib/python3.7/site-packages/stable_baselines3/common/logger.py", line 544, in dump
+        _format.write(self.name_to_value, self.name_to_excluded, step)
+    File "/home/deval/anaconda3/envs/drl/lib/python3.7/site-packages/stable_baselines3/common/logger.py", line 143, in write
+        self.file.write("\n".join(lines) + "\n")
+    ValueError: I/O operation on closed file.
+    ```
+    Solution: Add the following line to the logger.py file in the installation. Alternatively you can change the line and install the library locally. 
 
     Add the following line before line [142](https://github.com/DLR-RM/stable-baselines3/blob/e2b6f5460f362ecad3777d6fe2950f3199058d8f/stable_baselines3/common/logger.py#L142).
     ```py

@@ -10,6 +10,7 @@ from rlbench.action_modes import ArmActionMode, ActionMode
 from rlbench.observation_config import ObservationConfig
 import rlbench
 import numpy as np
+from pyquaternion import Quaternion
 
 import pyrep
 
@@ -28,9 +29,10 @@ class GraspEnv(gym.Env):
     ])
 
     def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
-                 render_mode: Union[None, str] = None):
+                 render_mode: Union[None, str] = None, action_range:float=0.01):
         self._observation_mode = observation_mode
         self._render_mode = render_mode
+        self.action_range = action_range
         obs_config = ObservationConfig()
         if observation_mode == 'state':
             obs_config.set_all_high_dim(False)
@@ -156,27 +158,36 @@ class GraspEnv(gym.Env):
         action = np.concatenate([new_pos, new_quat, [gripper]])
         return action
 
-    def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
-        self.n_steps += 1
+    def select_only_position(self, action:np.ndarray, action_range:float):
+
+        # import ipdb; ipdb.set_trace()
+        action = np.clip(action, -action_range, action_range)
         
+        mask = np.zeros(action.shape)
+        mask[:3] = 1
+        
+        action = action * mask
+        action[6] = 1
+        
+        return action
+
+    def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
+        
+        # self.n_steps += 1
+
         if self.task._action_mode.arm in self.ee_control_types:
-            action = self.normalize_action(action)
-            
+            action = self.select_only_position(action, self.action_range)
+        
         try:
             obs, reward, terminate = self.task.step(action)
-        except pyrep.errors.ConfigurationPathError:
+        except (pyrep.errors.ConfigurationPathError, rlbench.task_environment.InvalidActionError):
             obs = self.task._scene.get_observation()
-            _, terminate = self.task._task.success()
-            reward = self.task._task.reward()
-            # scale reward by change in translation/rotation
-        except rlbench.task_environment.InvalidActionError:
-            obs = self.task._scene.get_observation()
-            _, terminate = self.task._task.success()
-            reward = self.task._task.reward()
-            # terminate = True
-            # reward = -10
-            print("Out of bounds action, terminating at %d" % self.n_steps)
-            self.n_steps = 0
+            terminate = True
+            reward = -10
+            # _, terminate = self.task._task.success()
+            # reward = self.task._task.reward()
+            # print("Out of bounds action, terminating at %d" % self.n_steps)
+            # self.n_steps = 0
 
         return self._extract_obs(obs), reward, terminate, {}
 
