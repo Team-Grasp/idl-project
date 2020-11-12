@@ -8,6 +8,7 @@ from pyrep.objects.vision_sensor import VisionSensor
 from rlbench.environment import Environment
 from rlbench.action_modes import ArmActionMode, ActionMode
 from rlbench.observation_config import ObservationConfig
+import rlbench
 import numpy as np
 
 import pyrep
@@ -44,6 +45,7 @@ class GraspEnv(gym.Env):
             action_mode, obs_config=obs_config, headless=True)
         self.env.launch()
         self.task = self.env.get_task(task_class)
+        self.n_steps = 0
 
         desc, obs = self.task.reset()
         
@@ -128,6 +130,7 @@ class GraspEnv(gym.Env):
 
     def reset(self) -> Dict[str, np.ndarray]:
         descriptions, obs = self.task.reset()
+        self.n_steps = 0
         del descriptions  # Not used.
         return self._extract_obs(obs)
 
@@ -142,8 +145,8 @@ class GraspEnv(gym.Env):
         [ax, ay, az, aqx, aqy, aqz, aqw, gripper] = action
         x, y, z, qx, qy, qz, qw = self.task._robot.arm.get_tip().get_pose()
 
-        new_pos = np.array([x, y, z]) + np.array([ax, ay, az]) / 100
-        # new_pos = np.array([ax, ay, az]) / 100
+        # new_pos = np.array([x, y, z]) + np.array([ax, ay, az]) / 100
+        new_pos = np.array([ax, ay, az]) / 100
 
         new_quat = np.array([0, 0, 0, 1.0])
         # new_quat = np.array([qx, qy, qz, qw])
@@ -154,9 +157,11 @@ class GraspEnv(gym.Env):
         return action
 
     def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
+        self.n_steps += 1
+        
         if self.task._action_mode.arm in self.ee_control_types:
             action = self.normalize_action(action)
-
+            
         try:
             obs, reward, terminate = self.task.step(action)
         except pyrep.errors.ConfigurationPathError:
@@ -164,8 +169,14 @@ class GraspEnv(gym.Env):
             _, terminate = self.task._task.success()
             reward = self.task._task.reward()
             # scale reward by change in translation/rotation
-        # except rlbench.task_environment.InvalidActionError:
-            
+        except rlbench.task_environment.InvalidActionError:
+            obs = self.task._scene.get_observation()
+            _, terminate = self.task._task.success()
+            reward = self.task._task.reward()
+            # terminate = True
+            # reward = -10
+            print("Out of bounds action, terminating at %d" % self.n_steps)
+            self.n_steps = 0
 
         return self._extract_obs(obs), reward, terminate, {}
 
