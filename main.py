@@ -69,7 +69,6 @@ class CustomPolicy(MlpPolicy):
         return state_dicts, []
 
 
-
 if __name__ == "__main__":
     
     # Args

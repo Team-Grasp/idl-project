@@ -11,6 +11,8 @@ from rlbench.observation_config import ObservationConfig
 import rlbench
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from pyquaternion import Quaternion
+
 import pyrep
 
 
@@ -36,8 +38,10 @@ class GraspEnv(gym.Env):
     def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
                  render_mode: Union[None, str] = None, epsiode_length: int = 200, action_size: Union[None, int] = None,
                  manual_terminate: bool = True, penalize_illegal: bool = True):
+                 render_mode: Union[None, str] = None, action_range:float=0.01):
         self._observation_mode = observation_mode
         self._render_mode = render_mode
+        self.action_range = action_range
         obs_config = ObservationConfig()
         if observation_mode == 'state':
             obs_config.set_all_high_dim(False)
@@ -183,16 +187,33 @@ class GraspEnv(gym.Env):
 
         return action
 
+      
     def manual_step(self, action):
         self.task._robot.arm.get_tip().set_pose(action[:-1])
         success, terminate = self.task._task.success()
         task_reward = self.task._task.reward()
         obs = self._extract_obs(self.task._scene.get_observation())
         return obs, task_reward, terminate
+      
+      
+    def select_only_position(self, action:np.ndarray, action_range:float):
 
-    def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
-        self.n_steps += 1
+        # import ipdb; ipdb.set_trace()
+        action = np.clip(action, -action_range, action_range)
         
+        mask = np.zeros(action.shape)
+        mask[:3] = 1
+        
+        action = action * mask
+        action[6] = 1
+        
+        return action
+
+      
+    def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
+        
+        # self.n_steps += 1
+
         if self.task._action_mode.arm in self.ee_control_types:
             action = self.normalize_action(action)
             
@@ -231,5 +252,6 @@ class GraspEnv(gym.Env):
 
         return obs, reward, terminate, {}
 
+      
     def close(self) -> None:
         self.env.shutdown()
