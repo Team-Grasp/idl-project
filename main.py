@@ -2,6 +2,8 @@ import numpy as np
 import time
 import datetime
 
+import torch
+
 from rlbench.action_modes import ArmActionMode
 
 from stable_baselines3 import PPO, HER
@@ -56,7 +58,15 @@ def run_episode(model, env, max_iters, render=False):
 class CustomPolicy(MlpPolicy):
     def __init__(self, *args, **kwargs):
         super(CustomPolicy, self).__init__(*args, **kwargs,
-                net_arch=[64, 64, dict(pi=[64, 64], vf=[64, 64])] )
+                net_arch=[64, 64, dict(pi=[64, 64], vf=[64, 64])])
+
+        # self.optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        # self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
+
+    def _get_torch_save_params(self):
+        state_dicts = ["policy", "policy.optimizer", "policy.lr_scheduler"]
+
+        return state_dicts, []
 
 
 
@@ -69,23 +79,28 @@ if __name__ == "__main__":
     model_path = args.model_path
     num_episodes = args.num_episodes
     lr = args.lr
+    # lr_scheduler = None
     timestamp = int(time.time())
     print(args)
     
     eval_freq = 300
-    n_steps = 200
-    total_timesteps = 400 * n_steps
-    n_epochs = 1
-    batch_size = 128
-    save_freq = 10
+    n_steps = 2048  # number of samples to collect for one training iteration
+    epsiode_length = int(2048 // 4)
+    total_timesteps = 400 * n_steps 
+    n_epochs = 2
+    batch_size = 64
+    save_freq = 100
+    action_size = 3  # only control EE position
 
     # TaskEnvironment
     # env = gym.make('reach_target-state-v0', render_mode="human")
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     if render:
-        env = GraspEnv(task_class=ReachTargetCustom, render_mode="human", act_mode=act_mode)
+        env = GraspEnv(task_class=ReachTargetCustom, render_mode="human", 
+            act_mode=act_mode, epsiode_length=epsiode_length, action_size=action_size)
     else:
-        env = GraspEnv(task_class=ReachTargetCustom, act_mode=act_mode)
+        env = GraspEnv(task_class=ReachTargetCustom, act_mode=act_mode, 
+            epsiode_length=epsiode_length, action_size=action_size)
 
     # agent
     model = PPO(CustomPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
@@ -97,7 +112,7 @@ if __name__ == "__main__":
     # import ipdb; ipdb.set_trace()
 
     save_path = "models/%d" % timestamp
-    callback = ProgressCallback(eval_env=env, save_freq=save_freq, render_freq=1, \
+    callback = ProgressCallback(eval_env=env, save_freq=save_freq, render_freq=0, \
             save_path=save_path, deterministic=True, verbose=1)
 
     if model_path != "":
@@ -106,7 +121,7 @@ if __name__ == "__main__":
 
     if is_train:
         model.learn(total_timesteps=total_timesteps, callback=callback) 
-        model.save("models/weights_%d" % timestamp)
+        # model.save("models/weights_%d" % timestamp)
 
     else:
         for i in range(2):

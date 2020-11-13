@@ -31,6 +31,7 @@ class ProgressCallback(BaseCallback):
         self._deterministic = deterministic
         self.n_rollout_calls = 0 
 
+        self._is_save = save_freq > 0
         self.save_freq = save_freq
         self.save_path = save_path
         self.name_prefix = name_prefix
@@ -52,7 +53,7 @@ class ProgressCallback(BaseCallback):
     def _on_rollout_end(self) -> bool:
         self.n_rollout_calls += 1
 
-        if self.n_rollout_calls % self.save_freq == 0:
+        if self._is_save and (self.n_rollout_calls % self.save_freq == 0):
             self.save_weights()
 
         return True

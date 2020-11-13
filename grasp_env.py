@@ -10,7 +10,7 @@ from rlbench.action_modes import ArmActionMode, ActionMode
 from rlbench.observation_config import ObservationConfig
 import rlbench
 import numpy as np
-
+from scipy.spatial.transform import Rotation as R
 import pyrep
 
 
@@ -26,9 +26,15 @@ class GraspEnv(gym.Env):
         ArmActionMode.EE_POSE_EE_FRAME,
         ArmActionMode.EE_POSE_PLAN_EE_FRAME,
     ])
+    delta_ee_control_types = set([
+        ArmActionMode.DELTA_EE_POSE_WORLD_FRAME,
+        ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME,
+        ArmActionMode.EE_POSE_EE_FRAME,
+        ArmActionMode.EE_POSE_PLAN_EE_FRAME
+    ])
 
     def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
-                 render_mode: Union[None, str] = None):
+                 render_mode: Union[None, str] = None, epsiode_length: int = 200, action_size: Union[None, int] = None):
         self._observation_mode = observation_mode
         self._render_mode = render_mode
         obs_config = ObservationConfig()
@@ -46,13 +52,15 @@ class GraspEnv(gym.Env):
         self.env.launch()
         self.task = self.env.get_task(task_class)
         self.n_steps = 0
+        self.epsiode_length = epsiode_length
 
         desc, obs = self.task.reset()
         
         print(desc)
 
+        if action_size is None: action_size = self.env.action_size
         self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(self.env.action_size,))
+            low=-1.0, high=1.0, shape=(action_size,))
 
         if observation_mode == 'state':
             self.observation_space = spaces.Box(
@@ -130,6 +138,7 @@ class GraspEnv(gym.Env):
 
     def reset(self) -> Dict[str, np.ndarray]:
         descriptions, obs = self.task.reset()
+        print("RESET!")
         self.n_steps = 0
         del descriptions  # Not used.
         return self._extract_obs(obs)
@@ -141,19 +150,34 @@ class GraspEnv(gym.Env):
         action controls EE pose or change in pose. Actions have the following form:
         [x, y, z, qx, qy, qz, qw, gripper]
         """
-        assert(action.shape[0] == 8)
-        [ax, ay, az, aqx, aqy, aqz, aqw, gripper] = action
+        [ax, ay, az] = action[:3]
         x, y, z, qx, qy, qz, qw = self.task._robot.arm.get_tip().get_pose()
+        cur_pos = np.array([x, y, z])
+        cur_ori = np.array([qx, qy, qz, qw])
 
-        new_pos = np.array([x, y, z]) + np.array([ax, ay, az]) / 50
-        # new_pos = np.array([ax, ay, az]) / 100
+        d_pos = np.array([ax, ay, az])
+        d_pos /= (np.linalg.norm(d_pos) * 100.0)
+        d_quat = np.array([0, 0, 0, 1.0])
+        # d_euler = action[3:6] / 10.0
+        # drho, dphi, dtheta = d_euler
+        # rot = R.from_euler("xyz", [drho, dphi, dtheta], degrees=True)
+        # d_quat = rot.as_quat()
 
-        # new_quat = np.array([0, 0, 0, 1.0])
-        new_quat = np.array([qx, qy, qz, qw])
-        # new_quat /= np.linalg.norm(new_quat)
-        
+        if self.task._action_mode.arm in self.delta_ee_control_types:
+            action = np.concatenate([d_pos, d_quat, [1.0]])
 
-        action = np.concatenate([new_pos, new_quat, [gripper]])
+            # try:
+            #     joint_positions = self.task._robot.arm.solve_ik(
+            #         action[:3], quaternion=action[3:-1], relative_to=self.task._robot.arm.get_tip())
+            #     print("target joint positions: %s" % np.array2string(np.array(joint_positions), precision=2))
+            # except Exception as e:
+            #     print("Failed to get target joint posiitions due to %s" % str(e))
+
+        else:
+            new_pos = cur_pos + d_pos
+            new_quat = cur_ori
+            action = np.concatenate([new_pos, new_quat, [1.0]])
+
         return action
 
     def manual_step(self, action):
@@ -181,32 +205,36 @@ class GraspEnv(gym.Env):
         if self.task._action_mode.arm in self.ee_control_types:
             action = self.normalize_action(action)
             
-        try:
-            # self.task._robot.arm.solve_ik(
-            #     action[:3], quaternion=action[3:-1], relative_to=None)
-            # print("manually setting action")
-            obs, reward, terminate = self.manual_step(action)
-            # self.task._scene.step()
-            return obs, reward, terminate, {}
-        except Exception as e:
-            print(e)
+        # try:
+        #     obs, reward, terminate = self.manual_step(action)
+        #     # self.task._scene.step()
+        # except Exception as e:
+        #     print(e)
             
-
-        # except pyrep.errors.ConfigurationPathError:
-        #     obs = self.task._scene.get_observation()
-        #     _, terminate = self.task._task.success()
-        #     reward = self.task._task.reward()
-        #     # scale reward by change in translation/rotation
-        # except rlbench.task_environment.InvalidActionError:
-            obs = self.task._scene.get_observation()
+        try:
+            obs, reward, terminate = self.task.step(action)
+            obs = self._extract_obs(obs)
+        except pyrep.errors.ConfigurationPathError as e:
+            # print("Action %s failed due to %s" % (np.array2string(action, precision=3), e))
+            obs = self._extract_obs(self.task._scene.get_observation())
             _, terminate = self.task._task.success()
             reward = self.task._task.reward()
+            # scale reward by change in translation/rotation
+        except rlbench.task_environment.InvalidActionError as e:
+            # print("Action %s failed due to %s" % (np.array2string(action, precision=3), e))
+            obs = self._extract_obs(self.task._scene.get_observation())
+            _, terminate = self.task._task.success()
+            # reward = self.task._task.reward() * ERROR_SCALE
+            reward = -10
         #     # terminate = True
         #     # reward = -10
         #     print("Out of bounds action, terminating at %d" % self.n_steps)
         #     self.n_steps = 0
 
-            return self._extract_obs(obs), reward, terminate, {}
+        if self.n_steps > self.epsiode_length:
+            self.reset()
+
+        return obs, reward, terminate, {}
 
     def close(self) -> None:
         self.env.shutdown()

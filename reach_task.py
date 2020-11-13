@@ -11,6 +11,7 @@ class ReachTargetCustom(ReachTarget):
         dist_val = np.linalg.norm(dist) / 10.0
         # if dist_val < 0.1:
         #     return 10
+        # print("Distance: %.3f" % dist_val)
         return -dist_val
 
     def get_name(self):
