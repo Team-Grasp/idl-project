@@ -34,7 +34,8 @@ class GraspEnv(gym.Env):
     ])
 
     def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
-                 render_mode: Union[None, str] = None, epsiode_length: int = 200, action_size: Union[None, int] = None):
+                 render_mode: Union[None, str] = None, epsiode_length: int = 200, action_size: Union[None, int] = None,
+                 manual_terminate: bool = True, penalize_illegal: bool = True):
         self._observation_mode = observation_mode
         self._render_mode = render_mode
         obs_config = ObservationConfig()
@@ -53,6 +54,8 @@ class GraspEnv(gym.Env):
         self.task = self.env.get_task(task_class)
         self.n_steps = 0
         self.epsiode_length = epsiode_length
+        self.manual_terminate = manual_terminate
+        self.penalize_illegal = penalize_illegal
 
         desc, obs = self.task.reset()
         
@@ -181,22 +184,10 @@ class GraspEnv(gym.Env):
         return action
 
     def manual_step(self, action):
-        # print("Before action")
-        # print(self.task._robot.arm.get_tip().get_pose())
-        # print("Desired Pose:")
-        # print(action)
-        # print("After action:")
         self.task._robot.arm.get_tip().set_pose(action[:-1])
-        # print(self.task._robot.arm.get_tip().get_pose())
-        # print()
         success, terminate = self.task._task.success()
-        # target_pos = self.task._task.target.get_position()
         task_reward = self.task._task.reward()
         obs = self._extract_obs(self.task._scene.get_observation())
-        # print("Manual obs:")
-        # print(obs)
-        # print("Actual obs:")
-        # print(self._extract_obs(self.task._scene.get_observation()))
         return obs, task_reward, terminate
 
     def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
@@ -223,16 +214,20 @@ class GraspEnv(gym.Env):
         except rlbench.task_environment.InvalidActionError as e:
             # print("Action %s failed due to %s" % (np.array2string(action, precision=3), e))
             obs = self._extract_obs(self.task._scene.get_observation())
-            _, terminate = self.task._task.success()
-            # reward = self.task._task.reward() * ERROR_SCALE
-            reward = -10
-        #     # terminate = True
-        #     # reward = -10
-        #     print("Out of bounds action, terminating at %d" % self.n_steps)
-        #     self.n_steps = 0
+            if self.penalize_illegal:
+                reward = -5
+            else:
+                reward = self.task._task.reward()
+
+            if self.manual_terminate:
+                terminate = True
+                self.reset()
+            else:
+                _, terminate = self.task._task.success()
 
         if self.n_steps > self.epsiode_length:
             self.reset()
+            terminate = True
 
         return obs, reward, terminate, {}
 

@@ -83,24 +83,27 @@ if __name__ == "__main__":
     timestamp = int(time.time())
     print(args)
     
-    eval_freq = 300
     n_steps = 2048  # number of samples to collect for one training iteration
     epsiode_length = int(2048 // 4)
     total_timesteps = 400 * n_steps 
     n_epochs = 2
     batch_size = 64
-    save_freq = 100
+    save_freq = 10
     action_size = 3  # only control EE position
+    manual_terminate = True
+    penalize_illegal = False
 
     # TaskEnvironment
     # env = gym.make('reach_target-state-v0', render_mode="human")
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     if render:
         env = GraspEnv(task_class=ReachTargetCustom, render_mode="human", 
-            act_mode=act_mode, epsiode_length=epsiode_length, action_size=action_size)
+            act_mode=act_mode, epsiode_length=epsiode_length, action_size=action_size,
+            manual_terminate=manual_terminate, penalize_illegal=penalize_illegal)
     else:
         env = GraspEnv(task_class=ReachTargetCustom, act_mode=act_mode, 
-            epsiode_length=epsiode_length, action_size=action_size)
+            epsiode_length=epsiode_length, action_size=action_size,
+            manual_terminate=manual_terminate, penalize_illegal=penalize_illegal)
 
     # agent
     model = PPO(CustomPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size, \
@@ -117,15 +120,15 @@ if __name__ == "__main__":
 
     if model_path != "":
         print("Loading Existing model: %s" % model_path)
-        model = model.load(model_path)
+        model = model.load(model_path, env=env)
 
     if is_train:
         model.learn(total_timesteps=total_timesteps, callback=callback) 
         # model.save("models/weights_%d" % timestamp)
 
     else:
-        for i in range(2):
-            run_episode(model, env, max_iters=200)
+        for i in range(5):
+            run_episode(model, env, max_iters=epsiode_length)
 
     env.close()
 
