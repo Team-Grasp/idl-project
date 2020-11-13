@@ -37,8 +37,7 @@ class GraspEnv(gym.Env):
 
     def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
                  render_mode: Union[None, str] = None, epsiode_length: int = 200, action_size: Union[None, int] = None,
-                 manual_terminate: bool = True, penalize_illegal: bool = True):
-                 render_mode: Union[None, str] = None, action_range:float=0.01):
+                 manual_terminate: bool = True, penalize_illegal: bool = True, action_range:float=0.01):
         self._observation_mode = observation_mode
         self._render_mode = render_mode
         self.action_range = action_range

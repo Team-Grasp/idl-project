@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     else:
         for i in range(5):
-            run_episode(model, env, max_iters=epsiode_length)
+            run_episode(model, env, max_iters=200)
 
     env.close()
 
