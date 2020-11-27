@@ -21,7 +21,7 @@ class GraspEnv(gym.Env):
 
     metadata = {'render.modes': ['human', 'rgb_array']}
     ee_control_types = set([
-        ArmActionMode.ABS_EE_POSE_WORLD_FRAME, 
+        ArmActionMode.ABS_EE_POSE_WORLD_FRAME,
         ArmActionMode.DELTA_EE_POSE_WORLD_FRAME,
         ArmActionMode.ABS_EE_POSE_PLAN_WORLD_FRAME,
         ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME,
@@ -37,7 +37,7 @@ class GraspEnv(gym.Env):
 
     def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
                  render_mode: Union[None, str] = None, epsiode_length: int = 200, action_size: Union[None, int] = None,
-                 manual_terminate: bool = True, penalize_illegal: bool = True, action_range:float=0.01):
+                 manual_terminate: bool = True, penalize_illegal: bool = True, action_range: float = 0.01):
         self._observation_mode = observation_mode
         self._render_mode = render_mode
         self.action_range = action_range
@@ -61,10 +61,11 @@ class GraspEnv(gym.Env):
         self.penalize_illegal = penalize_illegal
 
         desc, obs = self.task.reset()
-        
+
         print(desc)
 
-        if action_size is None: action_size = self.env.action_size
+        if action_size is None:
+            action_size = self.env.action_size
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(action_size,))
 
@@ -84,7 +85,7 @@ class GraspEnv(gym.Env):
                     low=0, high=1, shape=obs.wrist_rgb.shape),
                 "front_rgb": spaces.Box(
                     low=0, high=1, shape=obs.front_rgb.shape),
-                })
+            })
 
         if render_mode is not None:
             # Add the camera to the scene
@@ -105,18 +106,18 @@ class GraspEnv(gym.Env):
         # low_dim_data = [] if obs.gripper_open is None else [[obs.gripper_open]]
         low_dim_data = []
         for data in [
-                    #  obs.joint_velocities, 
-                    #  obs.joint_positions,
-                    #  obs.joint_forces,
-                     obs.gripper_pose[0:3], 
-                    #  obs.gripper_joint_positions,
-                    #  obs.gripper_touch_forces, 
-                     obs.task_low_dim_state, # target state
-                    ]:
+            #  obs.joint_velocities,
+            #  obs.joint_positions,
+            #  obs.joint_forces,
+            obs.gripper_pose,
+            [obs.gripper_open],
+            #  obs.gripper_joint_positions,
+            #  obs.gripper_touch_forces,
+            obs.task_low_dim_state,  # target state
+        ]:
             if data is not None:
                 low_dim_data.append(data)
         return np.concatenate(low_dim_data) if len(low_dim_data) > 0 else np.array([])
-
 
     def _extract_obs(self, obs) -> Dict[str, np.ndarray]:
         if self._observation_mode == 'state':
@@ -163,14 +164,16 @@ class GraspEnv(gym.Env):
 
         d_pos = np.array([ax, ay, az])
         d_pos /= (np.linalg.norm(d_pos) * 100.0)
-        d_quat = np.array([0, 0, 0, 1.0])
-        # d_euler = action[3:6] / 10.0
-        # drho, dphi, dtheta = d_euler
-        # rot = R.from_euler("xyz", [drho, dphi, dtheta], degrees=True)
-        # d_quat = rot.as_quat()
+        # d_quat = np.array([0, 0, 0, 1.0])
+        d_euler = action[3:6] / 10.0
+        drho, dphi, dtheta = d_euler
+        rot = R.from_euler("xyz", [drho, dphi, dtheta], degrees=True)
+        d_quat = rot.as_quat()
+
+        gripper_open = action[-1]
 
         if self.task._action_mode.arm in self.delta_ee_control_types:
-            action = np.concatenate([d_pos, d_quat, [1.0]])
+            action = np.concatenate([d_pos, d_quat, [gripper_open]])
 
             # try:
             #     joint_positions = self.task._robot.arm.solve_ik(
@@ -186,42 +189,39 @@ class GraspEnv(gym.Env):
 
         return action
 
-      
     def manual_step(self, action):
         self.task._robot.arm.get_tip().set_pose(action[:-1])
         success, terminate = self.task._task.success()
         task_reward = self.task._task.reward()
         obs = self._extract_obs(self.task._scene.get_observation())
         return obs, task_reward, terminate
-      
-      
-    def select_only_position(self, action:np.ndarray, action_range:float):
+
+    def select_only_position(self, action: np.ndarray, action_range: float):
 
         # import ipdb; ipdb.set_trace()
         action = np.clip(action, -action_range, action_range)
-        
+
         mask = np.zeros(action.shape)
         mask[:3] = 1
-        
+
         action = action * mask
         action[6] = 1
-        
+
         return action
 
-      
     def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
-        
+
         # self.n_steps += 1
 
         if self.task._action_mode.arm in self.ee_control_types:
             action = self.normalize_action(action)
-            
+
         # try:
         #     obs, reward, terminate = self.manual_step(action)
         #     # self.task._scene.step()
         # except Exception as e:
         #     print(e)
-            
+
         try:
             obs, reward, terminate = self.task.step(action)
             obs = self._extract_obs(obs)
@@ -251,6 +251,5 @@ class GraspEnv(gym.Env):
 
         return obs, reward, terminate, {}
 
-      
     def close(self) -> None:
         self.env.shutdown()
