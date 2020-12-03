@@ -66,8 +66,9 @@ class GraspEnv(gym.Env):
 
         if action_size is None:
             action_size = self.env.action_size
+        self.action_size = action_size
         self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(action_size,))
+            low=-1.0, high=1.0, shape=(self.action_size,))
 
         if observation_mode == 'state':
             self.observation_space = spaces.Box(
@@ -143,6 +144,18 @@ class GraspEnv(gym.Env):
         if mode == 'rgb_array':
             return self._gym_cam.capture_rgb()
 
+    def switch_task(self, task_class):
+        self.task = self.env.get_task(task_class)
+
+    @staticmethod
+    def switch_task_wrapper(self, task_class: rlbench.backend.task.Task):
+        """Change current task by specifying desired task class. Task objects are randomly initialized.
+
+        Args:
+            task_class (rlbench.backend.task.Task): desired task class
+        """
+        self.envs[0].switch_task(task_class)
+
     def reset(self) -> Dict[str, np.ndarray]:
         descriptions, obs = self.task.reset()
         print("RESET!")
@@ -164,13 +177,14 @@ class GraspEnv(gym.Env):
 
         d_pos = np.array([ax, ay, az])
         d_pos /= (np.linalg.norm(d_pos) * 100.0)
-        # d_quat = np.array([0, 0, 0, 1.0])
+        d_quat = np.array([0, 0, 0, 1.0])
         d_euler = action[3:6] / 10.0
         drho, dphi, dtheta = d_euler
         rot = R.from_euler("xyz", [drho, dphi, dtheta], degrees=True)
         d_quat = rot.as_quat()
 
         gripper_open = action[-1]
+        # gripper_open = 1.0
 
         if self.task._action_mode.arm in self.delta_ee_control_types:
             action = np.concatenate([d_pos, d_quat, [gripper_open]])

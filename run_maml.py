@@ -12,9 +12,10 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from utils import parse_arguments
 from progress_callback import ProgressCallback
 
+from reach_task import ReachTargetCustomStatic, ReachTargetCustom
 from grasp_env import GraspEnv
-from reach_task import ReachTargetCustom
-from rlbench.tasks import ReachTarget, CloseMicrowave
+
+from maml import MAML
 
 
 def evaluate(model, env, num_episodes=100, max_iters=500):
@@ -84,31 +85,42 @@ if __name__ == "__main__":
     timestamp = int(time.time())
     print(args)
 
-    n_steps = 2048  # number of samples to collect for one training iteration
-    epsiode_length = int(2048 // 4)
-    total_timesteps = 400 * n_steps
-    n_epochs = 2
+    episode_length = 200
+    num_episodes = 5
+    n_steps = num_episodes * episode_length
+    total_timesteps = 1 * n_steps  # number of "epochs"
+    n_epochs = 1
     batch_size = 64
     save_freq = 10
     action_size = 7  # only control EE position
     manual_terminate = True
     penalize_illegal = False
 
-    # TaskEnvironment
-    # env = gym.make('reach_target-state-v0', render_mode="human")
+    # MAML parameters
+    num_tasks = 2
+    task_batch_size = 1
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     if render:
-        env = GraspEnv(task_class=ReachTarget, render_mode="human",
-                       act_mode=act_mode, epsiode_length=epsiode_length, action_size=action_size,
+        env = GraspEnv(task_class=ReachTargetCustom, render_mode="human",
+                       act_mode=act_mode, epsiode_length=episode_length, action_size=action_size,
                        manual_terminate=manual_terminate, penalize_illegal=penalize_illegal)
     else:
         env = GraspEnv(task_class=ReachTargetCustom, act_mode=act_mode,
-                       epsiode_length=epsiode_length, action_size=action_size,
+                       epsiode_length=episode_length, action_size=action_size,
                        manual_terminate=manual_terminate, penalize_illegal=penalize_illegal)
 
-    # agent
-    model = PPO(CustomPolicy, env, n_steps=n_steps, n_epochs=n_epochs, batch_size=batch_size,
-                learning_rate=lr, verbose=1, tensorboard_log="runs/", vf_coef=0.5, ent_coef=0.01)
+    alpha = 1e-3
+    beta = 1e-3
+    vf_coef = 0.5
+    ent_coef = 0.01
+    verbose = 1
+    num_iters = 400
+    base_init_kwargs = {'policy': CustomPolicy, 'env': env, 'n_steps': n_steps, 'n_epochs': n_epochs,
+                        'batch_size': batch_size, 'verbose': verbose, 'vf_coef': vf_coef, 'ent_coef': ent_coef}
+    base_adapt_kwargs = {'total_timesteps': total_timesteps}
+
+    model = MAML(BaseAlgo=PPO, num_tasks=num_tasks, task_batch_size=task_batch_size,
+                 alpha=alpha, beta=beta, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
 
     # Run one episode
     # run_episode(model, env, max_iters=100, render=True)
@@ -121,10 +133,10 @@ if __name__ == "__main__":
 
     if model_path != "":
         print("Loading Existing model: %s" % model_path)
-        model = model.load(model_path, env=env)
+        model.model = model.model.load(model_path, env=env)
 
     if is_train:
-        model.learn(total_timesteps=total_timesteps, callback=callback)
+        model.learn(num_iters=num_iters)
         # model.save("models/weights_%d" % timestamp)
 
     else:
