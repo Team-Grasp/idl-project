@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import datetime
+import copy
 
 import torch
 
@@ -12,50 +13,13 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from utils import parse_arguments
 from progress_callback import ProgressCallback
 
-from reach_task import ReachTargetCustomStatic, ReachTargetCustom
+from reach_task import ReachTargetCustom
 from grasp_env import GraspEnv
+from multitask_env import MultiTaskEnv
 
 from maml import MAML
 
-
-def evaluate(model, env, num_episodes=100, max_iters=500):
-    """
-    Evaluate a RL agent
-    :param model: (BaseRLModel object) the RL Agent
-    :param num_episodes: (int) number of episodes to evaluate it
-    :return: (float) Mean reward for the last num_episodes
-    """
-    all_episode_rewards = []
-    for i in range(num_episodes):
-        episode_rewards = run_episode(model, env, max_iters)
-        total_reward = sum(episode_rewards)
-        all_episode_rewards.append(total_reward)
-
-    mean_reward = np.mean(all_episode_rewards)
-    std_reward = np.std(all_episode_rewards)
-
-    return mean_reward, std_reward
-
-
-def run_episode(model, env, max_iters, render=False):
-    done = False
-    obs = env.reset()
-    episode_rewards = []
-    i = 0
-    while not done and i < max_iters:
-        # RLBench env doesn't have render
-        if render:
-            env.render()
-
-        # _states are only useful when using LSTM policies
-        action, _states = model.predict(obs)
-        # info isn't returned by RLBench env
-        obs, reward, done, _ = env.step(action)
-        episode_rewards.append(reward)
-
-        i += 1
-
-    return episode_rewards
+from eval_utils import *
 
 
 class CustomPolicy(MlpPolicy):
@@ -93,7 +57,7 @@ if __name__ == "__main__":
     batch_size = None
     action_size = 3  # only control EE position
     manual_terminate = True
-    penalize_illegal = False
+    penalize_illegal = True
 
     # MAML parameters
     num_tasks = 10
@@ -141,7 +105,42 @@ if __name__ == "__main__":
         # model.save("models/weights_%d" % timestamp)
 
     else:
-        for i in range(5):
-            run_episode(model, env, max_iters=200)
+        # np.save("test_targets", model.targets)
+        # exit()
+
+        # load in tasks
+        train_targets_path = "models/1607095661/targets.npy"
+        test_targets_path = "test_targets.npy"
+        train_targets = np.load(train_targets_path)
+        test_targets = np.load(test_targets_path)
+
+        # store metrics
+        pre_adapt_rewards = 0.0
+        post_adapt_rewards = 0.0
+
+        # make model revert to original loaded weights after each trial of updates
+        restore_weights = True
+
+        # see how the model does using the default loaded weights
+        for i in range(0, len(train_targets)):
+            pre_rewards, post_rewards = model.eval_performance(
+                target_position=train_targets[i], restore_weights=restore_weights)
+
+            pre_adapt_rewards += sum(pre_rewards)
+            post_adapt_rewards += sum(post_rewards)
+
+        print("Mean Pre-adapt Total Reward: %.3f" %
+              (pre_adapt_rewards / len(train_targets)))
+
+        print("Mean Post-adapt Total Reward: %.3f" %
+              (post_adapt_rewards / len(train_targets)))
+
+        # see how model does after one round of updates and compare, this should verify if MAML is working
+
+        # randomly generate a test task or load one. Reset weights to the original loaded ones
+        # perform the same comparison of first two steps above
+
+        # for i in range(5):
+        #     run_episode(model, env, max_iters=200)
 
     env.close()
