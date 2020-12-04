@@ -85,19 +85,18 @@ if __name__ == "__main__":
     timestamp = int(time.time())
     print(args)
 
-    episode_length = 10
-    num_episodes = 1  # "K" in K-shot learning
+    episode_length = 200  # horizon H
+    num_episodes = 5  # "K" in K-shot learning
     n_steps = num_episodes * episode_length
     total_timesteps = 1 * n_steps  # number of "epochs"
     n_epochs = 1
-    batch_size = 64
-    save_freq = 10
-    action_size = 7  # only control EE position
+    batch_size = None
+    action_size = 3  # only control EE position
     manual_terminate = True
     penalize_illegal = False
 
     # MAML parameters
-    num_tasks = 3
+    num_tasks = 10
     task_batch_size = 3
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     if render:
@@ -118,7 +117,6 @@ if __name__ == "__main__":
     base_init_kwargs = {'policy': CustomPolicy, 'env': env, 'n_steps': n_steps, 'n_epochs': n_epochs,
                         'batch_size': batch_size, 'verbose': verbose, 'vf_coef': vf_coef, 'ent_coef': ent_coef}
     base_adapt_kwargs = {'total_timesteps': total_timesteps}
-
     model = MAML(BaseAlgo=PPO, num_tasks=num_tasks, task_batch_size=task_batch_size,
                  alpha=alpha, beta=beta, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
 
@@ -126,8 +124,11 @@ if __name__ == "__main__":
     # run_episode(model, env, max_iters=100, render=True)
 
     # import ipdb; ipdb.set_trace()
-
+    save_targets = True
+    save_freq = 10
     save_path = "models/%d" % timestamp
+    save_kwargs = {'save_freq': save_freq,
+                   'save_path': save_path, 'tensorboard_log': save_path, 'save_targets': save_targets}
     callback = ProgressCallback(eval_env=env, save_freq=save_freq, render_freq=0,
                                 save_path=save_path, deterministic=True, verbose=1)
 
@@ -136,7 +137,7 @@ if __name__ == "__main__":
         model.model = model.model.load(model_path, env=env)
 
     if is_train:
-        model.learn(num_iters=num_iters)
+        model.learn(num_iters=num_iters, save_kwargs=save_kwargs)
         # model.save("models/weights_%d" % timestamp)
 
     else:
