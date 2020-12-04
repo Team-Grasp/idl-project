@@ -85,8 +85,8 @@ if __name__ == "__main__":
     timestamp = int(time.time())
     print(args)
 
-    episode_length = 200
-    num_episodes = 5
+    episode_length = 10
+    num_episodes = 1  # "K" in K-shot learning
     n_steps = num_episodes * episode_length
     total_timesteps = 1 * n_steps  # number of "epochs"
     n_epochs = 1
@@ -97,8 +97,8 @@ if __name__ == "__main__":
     penalize_illegal = False
 
     # MAML parameters
-    num_tasks = 2
-    task_batch_size = 1
+    num_tasks = 3
+    task_batch_size = 3
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     if render:
         env = GraspEnv(task_class=ReachTargetCustom, render_mode="human",

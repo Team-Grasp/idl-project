@@ -1,4 +1,5 @@
-from typing import Union, Dict, Tuple
+from typing import Union, Dict, Tuple, List
+import ipdb
 
 import gym
 from gym import spaces
@@ -110,8 +111,8 @@ class GraspEnv(gym.Env):
             #  obs.joint_velocities,
             #  obs.joint_positions,
             #  obs.joint_forces,
-            obs.gripper_pose,
-            [obs.gripper_open],
+            obs.gripper_pose[:3],
+            # [obs.gripper_open],
             #  obs.gripper_joint_positions,
             #  obs.gripper_touch_forces,
             obs.task_low_dim_state,  # target state
@@ -144,17 +145,19 @@ class GraspEnv(gym.Env):
         if mode == 'rgb_array':
             return self._gym_cam.capture_rgb()
 
-    def switch_task(self, task_class):
+    def switch_task(self, task_class, target_position: Union[List, None]):
         self.task = self.env.get_task(task_class)
+        self.task._task.target_position = target_position
 
     @staticmethod
-    def switch_task_wrapper(self, task_class: rlbench.backend.task.Task):
+    def switch_task_wrapper(self, task_class: rlbench.backend.task.Task,
+                            target_position: Union[List, None] = None):
         """Change current task by specifying desired task class. Task objects are randomly initialized.
 
         Args:
             task_class (rlbench.backend.task.Task): desired task class
         """
-        self.envs[0].switch_task(task_class)
+        self.envs[0].switch_task(task_class, target_position)
 
     def reset(self) -> Dict[str, np.ndarray]:
         descriptions, obs = self.task.reset()
@@ -175,16 +178,19 @@ class GraspEnv(gym.Env):
         cur_pos = np.array([x, y, z])
         cur_ori = np.array([qx, qy, qz, qw])
 
+        # position
         d_pos = np.array([ax, ay, az])
         d_pos /= (np.linalg.norm(d_pos) * 100.0)
-        d_quat = np.array([0, 0, 0, 1.0])
-        d_euler = action[3:6] / 10.0
-        drho, dphi, dtheta = d_euler
-        rot = R.from_euler("xyz", [drho, dphi, dtheta], degrees=True)
-        d_quat = rot.as_quat()
 
-        gripper_open = action[-1]
-        # gripper_open = 1.0
+        # orientation
+        d_quat = np.array([0, 0, 0, 1.0])
+        # d_euler = action[3:6] / 10.0
+        # drho, dphi, dtheta = d_euler
+        # rot = R.from_euler("xyz", [drho, dphi, dtheta], degrees=True)
+        # d_quat = rot.as_quat()
+
+        # gripper_open = action[-1]
+        gripper_open = 1.0
 
         if self.task._action_mode.arm in self.delta_ee_control_types:
             action = np.concatenate([d_pos, d_quat, [gripper_open]])

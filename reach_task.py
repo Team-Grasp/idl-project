@@ -9,11 +9,11 @@ from rlbench.backend.conditions import DetectedCondition
 from rlbench.tasks import ReachTarget
 import numpy as np
 
+import ipdb
+
 
 class ReachTargetCustom(ReachTarget):
-
     def reward(self) -> float:
-
         dist = self.target.get_position(self.robot.arm.get_tip())
         dist_val = np.linalg.norm(dist) / 10.0
 #         if dist_val < 0.1:
@@ -24,46 +24,30 @@ class ReachTargetCustom(ReachTarget):
         return "reach_target"
 
 
-class ReachTargetCustomStatic(ReachTarget):
-
-    def reward(self) -> float:
-
-        dist = self.target.get_position(self.robot.arm.get_tip())
-        dist_val = np.linalg.norm(dist) / 10.0
-#         if dist_val < 0.1:
-#             return 1
-        return -dist_val
-
-    def get_name(self):
-        return "reach_target"
-
-    def init_task(self) -> None:
-
-        super().init_task()
-        # set object poses only once in the beginning
-        b = SpawnBoundary([self.boundaries])
-        self.static_positions = []
-        for ob in [self.target, self.distractor0, self.distractor1]:
-            b.sample(ob, min_distance=0.2,
-                     min_rotation=(0, 0, 0), max_rotation=(0, 0, 0))
-            self.static_positions.append(ob.get_position())
-
-        print("static positions:")
-        for v in self.static_positions:
-            print(v)
-
-        import ipdb
-        ipdb.set_trace()
+class ReachTargetCustomStatic(ReachTargetCustom):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.target_position = None
 
     def init_episode(self, index: int) -> List[str]:
-
+        # vary the colors of distractors
         color_name, color_rgb = colors[index]
         self.target.set_color(color_rgb)
-        print("static positions:")
-        for v in self.static_positions:
-            print(v)
-        for i, ob in enumerate([self.target, self.distractor0, self.distractor1]):
-            ob.set_position(self.static_positions[i])
+
+        # set position of objects
+        b = SpawnBoundary([self.boundaries])
+        # distractors aren't used so just arbitrarily reset position
+        # b.sample(self.distractor0, min_distance=0.2,
+        #          min_rotation=(0, 0, 0), max_rotation=(0, 0, 0))
+        # b.sample(self.distractor1, min_distance=0.2,
+        #          min_rotation=(0, 0, 0), max_rotation=(0, 0, 0))
+
+        if self.target_position is None:
+            b.sample(self.target, min_distance=0.2,
+                     min_rotation=(0, 0, 0), max_rotation=(0, 0, 0))
+
+        else:
+            self.target.set_position(self.target_position)
 
         # randomize the distractor object colors
         # color_choices = np.random.choice(

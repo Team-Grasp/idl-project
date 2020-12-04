@@ -6,7 +6,8 @@ import torch
 
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common import logger, utils
-from reach_task import ReachTargetCustom
+from reach_task import ReachTargetCustom, ReachTargetCustomStatic
+from rlbench.backend.spawn_boundary import SpawnBoundary
 
 
 class MAML(object):
@@ -32,6 +33,13 @@ class MAML(object):
         self.base_init_kwargs = base_init_kwargs
         self.base_adapt_kwargs = base_adapt_kwargs
 
+        # randomly chosen set of static reach tasks
+        self.targets = []
+        for _ in range(3):
+            [obs] = self.model.env.reset()
+            target_position = obs[-3:]
+            self.targets.append(target_position)
+
         # utils.configure_logger(
         #     base_init_kwargs["verbose"], tensorboard_log, "PPO")
 
@@ -52,7 +60,7 @@ class MAML(object):
             for task in tasks:
                 # pick a task
                 self.model.env.switch_task_wrapper(
-                    self.model.env, ReachTargetCustom)
+                    self.model.env, ReachTargetCustomStatic, target_position=self.targets[task])
 
                 # copy over current original weights
                 self.model.policy.load_state_dict(orig_model.state_dict())
