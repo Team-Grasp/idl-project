@@ -62,6 +62,12 @@ class MAML(object):
             tasks = np.random.choice(
                 a=self.num_tasks, size=self.task_batch_size)
 
+            rewards = []
+            entropy_losses = []
+            pg_losses = []
+            value_losses = []
+            losses = []
+
             for task in tasks:
                 # pick a task
                 self.model.env.switch_task_wrapper(
@@ -83,6 +89,12 @@ class MAML(object):
                 for sum_grad, src_p in zip(sum_gradients, self.model.policy.parameters()):
                     sum_grad.data += src_p.grad.data
 
+                # store loss values
+                rewards.append(self.model.reward)
+                entropy_losses.append(self.model.entropy_loss)
+                value_losses.append(self.model.value_loss)
+                losses.append(self.model.loss)
+
             # apply sum of gradients to original model
             # no need for optimizer.zero_grad() because gradients directly set, not accumulated
             for orig_p, sum_grad in zip(orig_model.parameters(), sum_gradients):
@@ -95,11 +107,11 @@ class MAML(object):
                 self.model.save(path)
 
             # log Results
-            logger.record("train/mean_reward", self.model.reward)
-            logger.record("train/entropy_loss", self.model.entropy_loss)
-            logger.record("train/policy_gradient_loss", self.model.pg_loss)
-            logger.record("train/value_loss", self.model.value_loss)
-            logger.record("train/loss", self.model.loss)
+            logger.record("train/mean_reward", np.mean(rewards))
+            logger.record("train/entropy_loss", np.mean(entropy_losses))
+            logger.record("train/policy_gradient_loss", np.mean(pg_losses))
+            logger.record("train/value_loss", np.mean(value_losses))
+            logger.record("train/loss", np.mean(losses))
 
         # set final weights back into model
         self.model.policy.load_state_dict(orig_model.state_dict())
