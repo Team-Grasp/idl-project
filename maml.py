@@ -54,6 +54,16 @@ class MAML(object):
         optimizer = torch.optim.Adam(orig_model.parameters(), lr=self.beta)
         # lr_scheduler = torch.
 
+        import wandb
+        wandb.init(project="IDL - MAML")
+        config ={
+            "num_tasks":self.num_tasks,
+            "task_batch_size":self.task_batch_size,
+            "alpha":self.alpha,
+            "beta": self.beta
+        }
+        wandb.config = config
+
         for iter in range(num_iters):
             sum_gradients = [torch.zeros(p.shape).to(self.model.device)
                              for p in orig_model.parameters()]
@@ -107,11 +117,15 @@ class MAML(object):
                 self.model.save(path)
 
             # log Results
-            logger.record("train/mean_reward", np.mean(rewards))
-            logger.record("train/entropy_loss", np.mean(entropy_losses))
-            logger.record("train/policy_gradient_loss", np.mean(pg_losses))
-            logger.record("train/value_loss", np.mean(value_losses))
-            logger.record("train/loss", np.mean(losses))
+            wandb.log(
+                    {
+                        "mean_reward": np.mean(rewards),
+                        "entropy_loss": np.mean(entropy_losses),
+                        "policy_gradient_loss": np.mean(pg_losses),
+                        "value_loss": np.mean(value_losses),
+                        "loss": np.mean(losses)
+                    }
+                )
 
         # set final weights back into model
         self.model.policy.load_state_dict(orig_model.state_dict())
