@@ -55,6 +55,7 @@ class GraspEnv(gym.Env):
         self.env = Environment(
             action_mode, obs_config=obs_config, headless=True)
         self.env.launch()
+        self.task_class = task_class
         self.task = self.env.get_task(task_class)
         self.n_steps = 0
         self.epsiode_length = epsiode_length
