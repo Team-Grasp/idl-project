@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     # MAML parameters
     num_tasks = 10
-    task_batch_size = 6
+    task_batch_size = 2
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     # if render:
     #     env = GraspEnv(task_class=ReachTargetCustom, render_mode="human",
@@ -84,8 +84,9 @@ if __name__ == "__main__":
                         'batch_size': batch_size, 'verbose': verbose, 'vf_coef': vf_coef, 'ent_coef': ent_coef}
     base_adapt_kwargs = {'total_timesteps': total_timesteps}
 
-    train_targets_path = "models/1607113136/targets.npy"
-    train_targets = np.load(train_targets_path)
+    # train_targets_path = "models/1607113136/targets.npy"
+    # train_targets = np.load(train_targets_path)
+    train_targets = None
     model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv, num_tasks=num_tasks, task_batch_size=task_batch_size, env_kwargs=env_kwargs, targets=train_targets,
                  alpha=alpha, beta=beta, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
 
