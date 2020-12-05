@@ -18,17 +18,38 @@ import ray
 ray.init()
 
 
+class MetricStore(object):
+    def __init__(self):
+        self.total_reward = 0.0
+        self.total_entropy_loss = 0.0
+        self.total_pg_loss = 0.0
+        self.total_value_loss = 0.0
+        self.total_loss = 0.0
+
+    def add(self, metrics):
+        reward, entropy_loss, pg_loss, value_loss, loss = metrics
+        self.total_reward += reward
+        self.total_entropy_loss += entropy_loss
+        self.total_pg_loss += pg_loss
+        self.total_value_loss += value_loss
+        self.total_loss += loss
+
+    def avg(self, count):
+        count = float(count)
+        return (self.total_reward / count,
+                self.total_entropy_loss / count,
+                self.total_pg_loss / count,
+                self.total_value_loss / count,
+                self.total_loss / count)
+
+
 @ray.remote
-class MultiTaskEnvRay(object):
+class MAML_Worker(object):
     def __init__(self, EnvClass, ModelClass, env_kwargs, model_kwargs):
-        env = EnvClass(**env_kwargs)
-        self.model = ModelClass(env=env, **model_kwargs)
-        self.model.env.switch_task_wrapper = env.switch_task_wrapper
+        self.env = EnvClass(**env_kwargs)
+        self.model = ModelClass(env=self.env, **model_kwargs)
+        self.model.env.switch_task_wrapper = self.env.switch_task_wrapper
         self.base_init_kwargs = model_kwargs
-
-    # def get_gradients(self):
-
-    # def get_metrics(self)
 
     def perform_task_rollout(self, orig_model_state_dict, target,
                              base_adapt_kwargs):
@@ -42,6 +63,8 @@ class MultiTaskEnvRay(object):
 
         # train new model on K trajectories
         self.model.learn(**base_adapt_kwargs)
+        pre_metrics = [self.model.reward, self.model.entropy_loss, self.model.pg_loss,
+                       self.model.value_loss, self.model.loss]
 
         # collect new gradients for a one iteration
         # (NOTE: not one trajectory like paper does, shouldn't make a difference)
@@ -50,10 +73,10 @@ class MultiTaskEnvRay(object):
 
         gradients = [p.grad.data for p in self.model.policy.parameters()]
 
-        metrics = [self.model.reward, self.model.entropy_loss,
-                   self.model.value_loss, self.model.loss]
+        post_metrics = [self.model.reward, self.model.entropy_loss, self.model.pg_loss,
+                        self.model.value_loss, self.model.loss]
 
-        return gradients, metrics
+        return gradients, post_metrics, pre_metrics
 
     def sample_task(self):
         return self.model.env.reset()
@@ -61,14 +84,27 @@ class MultiTaskEnvRay(object):
     def get_model(self):
         return copy.deepcopy(self.model.policy), self.model.device
 
-    def save(self, state_dict, path):
-        self.model.policy.load_state_dict(state_dict)
-        self.model.save(path)
+    def load_model(self, state_dict=None, model_path=None):
+        if state_dict is not None:
+            self.model.policy.load_state_dict(state_dict)
+        else:
+            assert(model_path is not None)
+            self.model = self.model.load(model_path, env=self.env)
+            self.model.env.switch_task_wrapper = self.env.switch_task_wrapper
+
+    def save(self, state_dict, save_path):
+        self.load_model(state_dict=state_dict)
+        self.model.save(save_path)
+
+    def close(self):
+        self.env.close()
 
 
 class MAML(object):
+    BASE_ID = 0
+
     def __init__(self, BaseAlgo: BaseAlgorithm, EnvClass, num_tasks, task_batch_size,
-                 alpha, beta, env_kwargs, base_init_kwargs, base_adapt_kwargs, targets=None):
+                 alpha, beta, model_path, env_kwargs, base_init_kwargs, base_adapt_kwargs, targets=None):
         """
             BaseAlgo:
             task_envs: [GraspEnv, ...]
@@ -83,24 +119,33 @@ class MAML(object):
         self.alpha = alpha
         self.beta = beta
 
-        # self.model = BaseAlgo(learning_rate=alpha, **base_init_kwargs)
-        # self.model.env.switch_task_wrapper = base_init_kwargs["env"].switch_task_wrapper
         self.base_init_kwargs = base_init_kwargs
         self.base_adapt_kwargs = base_adapt_kwargs
 
         self.model_policy_vec = [
-            MultiTaskEnvRay.remote(EnvClass=EnvClass, ModelClass=BaseAlgo, env_kwargs=env_kwargs,
-                                   model_kwargs=base_init_kwargs)
+            MAML_Worker.remote(EnvClass=EnvClass, ModelClass=BaseAlgo, env_kwargs=env_kwargs,
+                               model_kwargs=base_init_kwargs)
             for i in range(task_batch_size)]
+
+        # optional load existing model
+        self.model_path = model_path
+        if model_path != "":
+            print("Loading Existing model: %s" % model_path)
+            self.model_policy_vec[self.BASE_ID].load_model.remote(
+                model_path=model_path)
+        else:
+            print("No Existing model. Randomly initializing weights")
 
         # randomly chosen set of static reach tasks
         if targets is None:
             self.targets = []
             for _ in range(num_tasks):
-                [obs] = ray.get(self.model_policy_vec[0].sample_task.remote())
+                [obs] = ray.get(
+                    self.model_policy_vec[self.BASE_ID].sample_task.remote())
+
                 target_position = obs[-3:]
-                print(target_position)
                 self.targets.append(target_position)
+                print(target_position)
         else:
             self.targets = targets
 
@@ -108,6 +153,7 @@ class MAML(object):
         utils.configure_logger(
             self.base_init_kwargs["verbose"], save_kwargs["tensorboard_log"], "PPO")
 
+        # log training results
         import wandb
         wandb.init(project="IDL - MAML", entity="idl-project")
         config = {
@@ -122,13 +168,10 @@ class MAML(object):
             target_path = os.path.join(save_kwargs["save_path"], "targets")
             np.save(target_path, self.targets)
 
-        # copy set of parameters once
-        # arbitrarily pick first model, all randomly initialized
-        # orig_model = BaseAlgo(env=env)
+        # initialize base model and optimizer
         orig_model, device = ray.get(
-            self.model_policy_vec[0].get_model.remote())
+            self.model_policy_vec[self.BASE_ID].get_model.remote())
         optimizer = torch.optim.Adam(orig_model.parameters(), lr=self.beta)
-
         # lr_scheduler = torch.
 
         for iter in range(num_iters):
@@ -136,12 +179,9 @@ class MAML(object):
             tasks = np.random.choice(
                 a=self.num_tasks, size=self.task_batch_size)
 
-            total_reward = 0.0
-            total_entropy_loss = 0.0
-            total_pg_loss = 0.0
-            total_value_loss = 0.0
-            total_loss = 0.0
+            metric_store = MetricStore()
 
+            # run multiple MAML task rollouts in parallel
             orig_model_state_dict = orig_model.state_dict()
             results = ray.get([
                 self.model_policy_vec[i].perform_task_rollout.remote(
@@ -150,75 +190,82 @@ class MAML(object):
                     base_adapt_kwargs=self.base_adapt_kwargs)
                 for i, task in enumerate(tasks)])
 
+            # initialize gradients
             optimizer.zero_grad()
             for p in orig_model.parameters():
                 p.grad = torch.zeros_like(p).to(device)
 
-            for gradients, metrics in results:
-                reward, entropy_loss, value_loss, loss = metrics
-                total_reward += reward
-                total_entropy_loss += entropy_loss
-                total_value_loss += value_loss
-                total_loss += loss
-
+            # sum up gradients and store metrics
+            for gradients, metrics, _ in results:
+                metric_store.add(metrics)
                 for orig_p, grad in zip(orig_model.parameters(), gradients):
-                    orig_p.grad += grad
+                    orig_p.grad += grad / self.task_batch_size
 
+            # apply gradients
             optimizer.step()
 
+            # track performance
+            (avg_reward, avg_entropy_loss, avg_pg_loss,
+                avg_val_loss, avg_loss) = metric_store.avg(self.task_batch_size)
             wandb.log(
                 {
-                    "mean_reward": total_reward / self.task_batch_size,
-                    "entropy_loss": total_entropy_loss / self.task_batch_size,
-                    "policy_gradient_loss": total_pg_loss / self.task_batch_size,
-                    "value_loss": total_value_loss / self.task_batch_size,
-                    "loss": total_loss / self.task_batch_size
+                    "mean_reward": avg_reward,
+                    "entropy_loss": avg_entropy_loss,
+                    "policy_gradient_loss": avg_pg_loss,
+                    "value_loss": avg_val_loss,
+                    "loss": avg_loss
                 }
             )
 
-            if iter > 0 and iter % save_kwargs["save_freq"] == 0:
+            # save weights every save_freq and at the end
+            if (iter > 0 and iter % save_kwargs["save_freq"] == 0) or iter == num_iters-1:
                 path = os.path.join(save_kwargs["save_path"], f"{iter}_iters")
-                self.model_policy_vec[0].save.remote(
+                self.model_policy_vec[self.BASE_ID].save.remote(
                     orig_model.state_dict(), path)
 
-        # set final weights back into model
-        # self.model.policy.load_state_dict(orig_model.state_dict())
+    def eval_performance(self, targets=None, restore_weights=True):
+        if targets is None:
+            targets = self.targets
+            num_tasks = self.num_tasks
+        else:
+            num_tasks = len(targets)
+        num_batches = np.ceil(num_tasks / self.task_batch_size).astype(int)
 
-    def eval_performance(self, target_position, restore_weights=True):
-        # save original model weights
-        orig_model = copy.deepcopy(self.model.policy)
+        pre_metric_store = MetricStore()
+        post_metric_store = MetricStore()
 
-        # load original weights
-        self.model.policy.load_state_dict(orig_model.state_dict())
+        orig_model, device = ray.get(
+            self.model_policy_vec[self.BASE_ID].get_model.remote())
+        orig_model_state_dict = orig_model.state_dict()
 
-        # set task
-        try:
-            self.model.env.switch_task_wrapper(
-                self.model.env, ReachTargetCustom, target_position=target_position)
-        except AttributeError:
-            self.model.env.switch_task_wrapper = self.base_init_kwargs["env"].switch_task_wrapper
-            self.model.env.switch_task_wrapper(
-                self.model.env, ReachTargetCustom, target_position=target_position)
+        for bi in range(num_batches):
+            start_idx = bi * self.task_batch_size
+            end_idx = min((bi+1)*self.task_batch_size, len(targets))
+            batch_targets = targets[start_idx:end_idx]
 
-        # run an episode of evaluation
-        print("Pre-evaluation...")
-        pre_adapt_rewards = run_episode(
-            self.model, self.model.env, max_iters=200)
+            results = ray.get([
+                self.model_policy_vec[i].perform_task_rollout.remote(
+                    orig_model_state_dict=orig_model_state_dict,
+                    target=target,
+                    base_adapt_kwargs=self.base_adapt_kwargs)
+                for i, target in enumerate(batch_targets)])
 
-        # run one iteration of training on this task
-        print("Adapting...")
-        self.model.learn(**self.base_adapt_kwargs)
+            for _, post_metrics, pre_metrics in results:
+                post_metric_store.add(post_metrics)
+                pre_metric_store.add(pre_metrics)
 
-        # run another episode of evaluation to see how much reward improved
-        print("Post-evaluation...")
-        post_adapt_rewards = run_episode(
-            self.model, self.model.env, max_iters=200)
-
-        # optionally restore original weights
+        # restore original model parameters so next call to eval uses same pre-loaded weights
         if restore_weights:
-            self.model.policy.load_state_dict(orig_model.state_dict())
+            assert(self.model_path != "")
+            self.model_policy_vec[self.BASE_ID].load_model.remote(
+                model_path=self.model_path)
+            # NOTE: below doesn't work due to this error:
+            # # RuntimeError: Only Tensors created explicitly by the user (graph leaves) support the deepcopy protocol at the moment
+            # self.model_policy_vec[self.BASE_ID].load_model.remote(
+            #     state_dict=orig_model_state_dict)
 
-        return pre_adapt_rewards, post_adapt_rewards
+        return pre_metric_store.avg(num_tasks), post_metric_store.avg(num_tasks)
 
-    def predict(self, obs):
-        return self.model.predict(obs)
+    def close(self):
+        [self.model_policy_vec[i].close.remote()
+         for i in range(self.task_batch_size)]
