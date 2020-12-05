@@ -19,30 +19,46 @@ ray.init()
 
 
 @ray.remote
-def perform_task_rollout(model, env, orig_model_state_dict, target,
-                         base_adapt_kwargs, base_init_kwargs):
-    # pick a task
-    model.env.switch_task_wrapper(
-        model.env, ReachTargetCustom, target_position=target)
-    print("Switched to new target:", target)
+class MultiTaskEnvRay(object):
+    def __init__(self, EnvClass, ModelClass, env_kwargs, model_kwargs):
+        env = EnvClass(**env_kwargs)
+        self.model = ModelClass(env=env, **model_kwargs)
+        self.model.env.switch_task_wrapper = env.switch_task_wrapper
+        self.base_init_kwargs = model_kwargs
 
-    # copy over current original weights
-    model.policy.load_state_dict(orig_model_state_dict)
+    # def get_gradients(self):
 
-    # train new model on K trajectories
-    model.learn(**base_adapt_kwargs)
+    # def get_metrics(self)
 
-    # collect new gradients for a one iteration
-    # (NOTE: not one trajectory like paper does, shouldn't make a difference)
-    # learn() already calls loss.backward()
-    model.learn(total_timesteps=1*base_init_kwargs['n_steps'])
+    def perform_task_rollout(self, orig_model_state_dict, target,
+                             base_adapt_kwargs):
+        # pick a task
+        self.model.env.switch_task_wrapper(
+            self.model.env, ReachTargetCustom, target_position=target)
+        print("Switched to new target:", target)
 
-    gradients = [p.grad.data for p in model.policy.parameters()]
+        # copy over current original weights
+        self.model.policy.load_state_dict(orig_model_state_dict)
 
-    metrics = [model.reward, model.entropy_loss,
-               model.value_loss, model.loss]
+        # train new model on K trajectories
+        print("Adapting...")
+        self.model.learn(**base_adapt_kwargs)
 
-    return gradients, metrics
+        # collect new gradients for a one iteration
+        # (NOTE: not one trajectory like paper does, shouldn't make a difference)
+        # learn() already calls loss.backward()
+        print("finally")
+        self.model.learn(total_timesteps=1*self.base_init_kwargs['n_steps'])
+
+        gradients = [p.grad.data for p in self.model.policy.parameters()]
+
+        metrics = [self.model.reward, self.model.entropy_loss,
+                   self.model.value_loss, self.model.loss]
+
+        return gradients, metrics
+
+    def get_model(self):
+        return copy.deepcopy(self.model.policy), self.model.device
 
 
 class MAML(object):
@@ -55,7 +71,6 @@ class MAML(object):
             Task-Agnostic because loss function defined by Advantage = Reward - Value function.
 
         """
-        self.BaseAlgo = BaseAlgo
         self.num_tasks = num_tasks
         self.task_batch_size = task_batch_size
 
@@ -79,9 +94,10 @@ class MAML(object):
         else:
             self.targets = targets
 
-        self.env_vec = [EnvClass(**env_kwargs) for i in range(task_batch_size)]
-        self.model_vec = [BaseAlgo(learning_rate=alpha, env=self.env_vec[i], **base_init_kwargs)
-                          for i in range(task_batch_size)]
+        self.model_policy_vec = [
+            MultiTaskEnvRay.remote(EnvClass=EnvClass, ModelClass=BaseAlgo, env_kwargs=env_kwargs,
+                                   model_kwargs=base_init_kwargs)
+            for i in range(task_batch_size)]
 
     def learn(self, num_iters, save_kwargs):
         utils.configure_logger(
@@ -93,12 +109,15 @@ class MAML(object):
 
         # copy set of parameters once
         # arbitrarily pick first model, all randomly initialized
-        orig_model = copy.deepcopy(self.model_vec[0].policy)
+        # orig_model = BaseAlgo(env=env)
+        print("here1")
+        orig_model, device = ray.get(
+            self.model_policy_vec[0].get_model.remote())
         optimizer = torch.optim.Adam(orig_model.parameters(), lr=self.beta)
         # lr_scheduler = torch.
 
         for iter in range(num_iters):
-            sum_gradients = [torch.zeros(p.shape).to(self.model.device)
+            sum_gradients = [torch.zeros(p.shape).to(device)
                              for p in orig_model.parameters()]
 
             # sample task_batch_size tasks from set of [0, num_task) tasks
@@ -111,43 +130,30 @@ class MAML(object):
             value_losses = []
             losses = []
 
+            print("ehre2")
             orig_model_state_dict = orig_model.state_dict()
-            results = [
-                perform_task_rollout.remote(
-                    model=self.model_vec[i], env=self.env_vec[i],
+            results = ray.get([
+                self.model_policy_vec[i].perform_task_rollout.remote(
                     orig_model_state_dict=orig_model_state_dict,
                     target=self.targets[task],
-                    base_adapt_kwargs=self.base_adapt_kwargs,
-                    base_init_kwargs=self.base_init_kwargs)
+                    base_adapt_kwargs=self.base_adapt_kwargs)
+                for i, task in enumerate(tasks)])
 
-                for i, task in enumerate(tasks)]
-
-            import ipdb
-            ipdb.set_trace()
-            results = ray.get(results)
+            print('ehr3')
+            optimizer.zero_grad()
 
             for gradients, metrics in results:
                 for orig_p, grad in zip(orig_model.parameters(), gradients):
                     orig_p.grad += grad
 
-            # apply sum of gradients to original model
-            # no need for optimizer.zero_grad() because gradients directly set, not accumulated
-
             optimizer.step()
 
             if iter > 0 and iter % save_kwargs["save_freq"] == 0:
                 path = os.path.join(save_kwargs["save_path"], f"{iter}_iters")
-                self.model.save(path)
-
-            # log Results
-            # logger.record("train/mean_reward", np.mean(rewards))
-            # logger.record("train/entropy_loss", np.mean(entropy_losses))
-            # logger.record("train/policy_gradient_loss", np.mean(pg_losses))
-            # logger.record("train/value_loss", np.mean(value_losses))
-            # logger.record("train/loss", np.mean(losses))
+                self.model_policy_vec[0].save.remote(path)
 
         # set final weights back into model
-        self.model.policy.load_state_dict(orig_model.state_dict())
+        # self.model.policy.load_state_dict(orig_model.state_dict())
 
     def eval_performance(self, target_position, restore_weights=True):
         # save original model weights

@@ -70,7 +70,8 @@ if __name__ == "__main__":
     # else:
     #     env = GraspEnv()
 
-    env_kwargs = {'task_class': ReachTargetCustom, 'act_mode': act_mode,
+    render_mode = "human" if render else None
+    env_kwargs = {'task_class': ReachTargetCustom, 'act_mode': act_mode, "render_mode": render_mode,
                   'epsiode_length': episode_length, 'action_size': action_size,
                   'manual_terminate': manual_terminate, 'penalize_illegal': penalize_illegal}
     alpha = 1e-3
@@ -79,7 +80,7 @@ if __name__ == "__main__":
     ent_coef = 0.01
     verbose = 1
     num_iters = 400
-    base_init_kwargs = {'policy': CustomPolicy, 'n_steps': n_steps, 'n_epochs': n_epochs,
+    base_init_kwargs = {'policy': CustomPolicy, 'n_steps': n_steps, 'n_epochs': n_epochs, 'learning_rate': alpha,
                         'batch_size': batch_size, 'verbose': verbose, 'vf_coef': vf_coef, 'ent_coef': ent_coef}
     base_adapt_kwargs = {'total_timesteps': total_timesteps}
 
