@@ -49,8 +49,8 @@ if __name__ == "__main__":
     timestamp = int(time.time())
     print(args)
 
-    episode_length = 200  # horizon H
-    num_episodes = 5  # "K" in K-shot learning
+    episode_length = 10  # horizon H
+    num_episodes = 1  # "K" in K-shot learning
     n_steps = num_episodes * episode_length
     total_timesteps = 1 * n_steps  # number of "epochs"
     n_epochs = 1
@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     # MAML parameters
     num_tasks = 10
-    task_batch_size = 3
+    task_batch_size = 6
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     # if render:
     #     env = GraspEnv(task_class=ReachTargetCustom, render_mode="human",

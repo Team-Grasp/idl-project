@@ -114,6 +114,7 @@ class MAML(object):
         orig_model, device = ray.get(
             self.model_policy_vec[0].get_model.remote())
         optimizer = torch.optim.Adam(orig_model.parameters(), lr=self.beta)
+
         # lr_scheduler = torch.
 
         for iter in range(num_iters):
@@ -140,10 +141,13 @@ class MAML(object):
                 for i, task in enumerate(tasks)])
 
             print('ehr3')
+            ipdb.set_trace()
             optimizer.zero_grad()
 
-            for gradients, metrics in results:
+            for i, (gradients, metrics) in enumerate(results):
                 for orig_p, grad in zip(orig_model.parameters(), gradients):
+                    if orig_p.grad is None:
+                        orig_p.grad = torch.zeros_like(orig_p).to(device)
                     orig_p.grad += grad
 
             optimizer.step()
