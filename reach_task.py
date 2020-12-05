@@ -23,13 +23,12 @@ class ReachTargetCustom(ReachTarget):
 #         if dist_val < 0.1:
 #             return 1
         return -dist_val
-    
+
     def init_episode(self, index: int) -> List[str]:
         super().init_episode(index)
-        
-        if self.target_position is not None: 
+
+        if self.target_position is not None:
             self.target.set_position(self.target_position)
-    
+
     def get_name(self):
         return "reach_target"
-

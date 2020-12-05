@@ -5,6 +5,8 @@ import os
 
 import torch
 
+from multiprocessing import Pool
+
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common import logger, utils
 from reach_task import ReachTargetCustom
@@ -12,10 +14,40 @@ from rlbench.backend.spawn_boundary import SpawnBoundary
 
 from eval_utils import *
 
+import ray
+ray.init()
+
+
+@ray.remote
+def perform_task_rollout(model, env, orig_model_state_dict, target,
+                         base_adapt_kwargs, base_init_kwargs):
+    # pick a task
+    model.env.switch_task_wrapper(
+        model.env, ReachTargetCustom, target_position=target)
+    print("Switched to new target:", target)
+
+    # copy over current original weights
+    model.policy.load_state_dict(orig_model_state_dict)
+
+    # train new model on K trajectories
+    model.learn(**base_adapt_kwargs)
+
+    # collect new gradients for a one iteration
+    # (NOTE: not one trajectory like paper does, shouldn't make a difference)
+    # learn() already calls loss.backward()
+    model.learn(total_timesteps=1*base_init_kwargs['n_steps'])
+
+    gradients = [p.grad.data for p in model.policy.parameters()]
+
+    metrics = [model.reward, model.entropy_loss,
+               model.value_loss, model.loss]
+
+    return gradients, metrics
+
 
 class MAML(object):
-    def __init__(self, BaseAlgo: BaseAlgorithm, num_tasks, task_batch_size,
-                 alpha, beta, base_init_kwargs, base_adapt_kwargs, targets=None):
+    def __init__(self, BaseAlgo: BaseAlgorithm, EnvClass, num_tasks, task_batch_size,
+                 alpha, beta, env_kwargs, base_init_kwargs, base_adapt_kwargs, targets=None):
         """
             BaseAlgo:
             task_envs: [GraspEnv, ...]
@@ -31,24 +63,25 @@ class MAML(object):
         self.alpha = alpha
         self.beta = beta
 
-        self.model = BaseAlgo(learning_rate=alpha, **base_init_kwargs)
-        self.model.env.switch_task_wrapper = base_init_kwargs["env"].switch_task_wrapper
+        # self.model = BaseAlgo(learning_rate=alpha, **base_init_kwargs)
+        # self.model.env.switch_task_wrapper = base_init_kwargs["env"].switch_task_wrapper
         self.base_init_kwargs = base_init_kwargs
         self.base_adapt_kwargs = base_adapt_kwargs
 
         # randomly chosen set of static reach tasks
         if targets is None:
             self.targets = []
-            for _ in range(num_tasks):
-                [obs] = self.model.env.reset()
-                target_position = obs[-3:]
-                self.targets.append(target_position)
+            assert("NO TASKS!")
+            # for _ in range(num_tasks):
+            #     [obs] = self.model.env.reset()
+            #     target_position = obs[-3:]
+            #     self.targets.append(target_position)
         else:
             self.targets = targets
 
-        print("Targets:")
-        for v in self.targets:
-            print(v)
+        self.env_vec = [EnvClass(**env_kwargs) for i in range(task_batch_size)]
+        self.model_vec = [BaseAlgo(learning_rate=alpha, env=self.env_vec[i], **base_init_kwargs)
+                          for i in range(task_batch_size)]
 
     def learn(self, num_iters, save_kwargs):
         utils.configure_logger(
@@ -59,7 +92,8 @@ class MAML(object):
             np.save(target_path, self.targets)
 
         # copy set of parameters once
-        orig_model = copy.deepcopy(self.model.policy)
+        # arbitrarily pick first model, all randomly initialized
+        orig_model = copy.deepcopy(self.model_vec[0].policy)
         optimizer = torch.optim.Adam(orig_model.parameters(), lr=self.beta)
         # lr_scheduler = torch.
 
@@ -77,38 +111,27 @@ class MAML(object):
             value_losses = []
             losses = []
 
-            for task in tasks:
-                # pick a task
-                self.model.env.switch_task_wrapper(
-                    self.model.env, ReachTargetCustom, target_position=self.targets[task])
-                print("Switched to new target:", self.targets[task])
+            orig_model_state_dict = orig_model.state_dict()
+            results = [
+                perform_task_rollout.remote(
+                    model=self.model_vec[i], env=self.env_vec[i],
+                    orig_model_state_dict=orig_model_state_dict,
+                    target=self.targets[task],
+                    base_adapt_kwargs=self.base_adapt_kwargs,
+                    base_init_kwargs=self.base_init_kwargs)
 
-                # copy over current original weights
-                self.model.policy.load_state_dict(orig_model.state_dict())
+                for i, task in enumerate(tasks)]
 
-                # train new model on K trajectories
-                self.model.learn(**self.base_adapt_kwargs)
+            import ipdb
+            ipdb.set_trace()
+            results = ray.get(results)
 
-                # collect new gradients for a one iteration
-                # (NOTE: not one trajectory like paper does, shouldn't make a difference)
-                # learn() already calls loss.backward()
-                self.model.learn(
-                    total_timesteps=1*self.base_init_kwargs['n_steps'])
-
-                # add up gradients
-                for sum_grad, src_p in zip(sum_gradients, self.model.policy.parameters()):
-                    sum_grad.data += src_p.grad.data
-
-                # store loss values
-                rewards.append(self.model.reward)
-                entropy_losses.append(self.model.entropy_loss)
-                value_losses.append(self.model.value_loss)
-                losses.append(self.model.loss)
+            for gradients, metrics in results:
+                for orig_p, grad in zip(orig_model.parameters(), gradients):
+                    orig_p.grad += grad
 
             # apply sum of gradients to original model
             # no need for optimizer.zero_grad() because gradients directly set, not accumulated
-            for orig_p, sum_grad in zip(orig_model.parameters(), sum_gradients):
-                orig_p.grad = sum_grad
 
             optimizer.step()
 

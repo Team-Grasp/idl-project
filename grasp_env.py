@@ -146,13 +146,14 @@ class GraspEnv(gym.Env):
         if mode == 'rgb_array':
             return self._gym_cam.capture_rgb()
 
-    def switch_task(self, task_class, target_position: Union[List, None]):
+    # : Union[List, None]):
+    def switch_task(self, task_class, target_position):
         self.task = self.env.get_task(task_class)
         self.task._task.target_position = target_position
 
     @staticmethod
     def switch_task_wrapper(self, task_class: rlbench.backend.task.Task,
-                            target_position: Union[List, None] = None):
+                            target_position):  # : Union[List, None] = None):
         """Change current task by specifying desired task class. Task objects are randomly initialized.
 
         Args:

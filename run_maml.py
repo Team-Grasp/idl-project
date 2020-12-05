@@ -63,25 +63,29 @@ if __name__ == "__main__":
     num_tasks = 10
     task_batch_size = 3
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
-    if render:
-        env = GraspEnv(task_class=ReachTargetCustom, render_mode="human",
-                       act_mode=act_mode, epsiode_length=episode_length, action_size=action_size,
-                       manual_terminate=manual_terminate, penalize_illegal=penalize_illegal)
-    else:
-        env = GraspEnv(task_class=ReachTargetCustom, act_mode=act_mode,
-                       epsiode_length=episode_length, action_size=action_size,
-                       manual_terminate=manual_terminate, penalize_illegal=penalize_illegal)
+    # if render:
+    #     env = GraspEnv(task_class=ReachTargetCustom, render_mode="human",
+    #                    act_mode=act_mode, epsiode_length=episode_length, action_size=action_size,
+    #                    manual_terminate=manual_terminate, penalize_illegal=penalize_illegal)
+    # else:
+    #     env = GraspEnv()
 
+    env_kwargs = {'task_class': ReachTargetCustom, 'act_mode': act_mode,
+                  'epsiode_length': episode_length, 'action_size': action_size,
+                  'manual_terminate': manual_terminate, 'penalize_illegal': penalize_illegal}
     alpha = 1e-3
     beta = 1e-3
     vf_coef = 0.5
     ent_coef = 0.01
     verbose = 1
     num_iters = 400
-    base_init_kwargs = {'policy': CustomPolicy, 'env': env, 'n_steps': n_steps, 'n_epochs': n_epochs,
+    base_init_kwargs = {'policy': CustomPolicy, 'n_steps': n_steps, 'n_epochs': n_epochs,
                         'batch_size': batch_size, 'verbose': verbose, 'vf_coef': vf_coef, 'ent_coef': ent_coef}
     base_adapt_kwargs = {'total_timesteps': total_timesteps}
-    model = MAML(BaseAlgo=PPO, num_tasks=num_tasks, task_batch_size=task_batch_size,
+
+    train_targets_path = "models/1607113136/targets.npy"
+    train_targets = np.load(train_targets_path)
+    model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv, num_tasks=num_tasks, task_batch_size=task_batch_size, env_kwargs=env_kwargs, targets=train_targets,
                  alpha=alpha, beta=beta, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
 
     # Run one episode
@@ -93,12 +97,12 @@ if __name__ == "__main__":
     save_path = "models/%d" % timestamp
     save_kwargs = {'save_freq': save_freq,
                    'save_path': save_path, 'tensorboard_log': save_path, 'save_targets': save_targets}
-    callback = ProgressCallback(eval_env=env, save_freq=save_freq, render_freq=0,
-                                save_path=save_path, deterministic=True, verbose=1)
+    # callback = ProgressCallback(eval_env=env, save_freq=save_freq, render_freq=0,
+    #                             save_path=save_path, deterministic=True, verbose=1)
 
     if model_path != "":
         print("Loading Existing model: %s" % model_path)
-        model.model = model.model.load(model_path, env=env)
+        # model.model = model.model.load(model_path, env=env)
 
     if is_train:
         model.learn(num_iters=num_iters, save_kwargs=save_kwargs)
