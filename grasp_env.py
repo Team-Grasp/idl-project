@@ -233,7 +233,7 @@ class GraspEnv(gym.Env):
 
     def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, dict]:
 
-        # self.n_steps += 1
+        self.n_steps += 1
 
         if self.task._action_mode.arm in self.ee_control_types:
             action = self.normalize_action(action)
