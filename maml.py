@@ -66,17 +66,13 @@ class MAML_Worker(object):
         pre_metrics = [self.model.reward, self.model.entropy_loss, self.model.pg_loss,
                        self.model.value_loss, self.model.loss]
 
-        # collect new gradients for a one iteration
-        # (NOTE: not one trajectory like paper does, shouldn't make a difference)
-        # learn() already calls loss.backward()
-        self.model.learn(total_timesteps=1*self.base_init_kwargs['n_steps'])
-
-        gradients = [p.grad.data for p in self.model.policy.parameters()]
+        # gradients = [p.grad.data for p in self.model.policy.parameters()]
+        parameters = [p.data for p in self.model.policy.parameters()]
 
         post_metrics = [self.model.reward, self.model.entropy_loss, self.model.pg_loss,
                         self.model.value_loss, self.model.loss]
 
-        return gradients, post_metrics, pre_metrics
+        return parameters, post_metrics, pre_metrics
 
     def sample_task(self):
         return self.model.env.reset()
@@ -186,20 +182,27 @@ class MAML(object):
             results = ray.get([
                 self.model_policy_vec[i].perform_task_rollout.remote(
                     orig_model_state_dict=orig_model_state_dict,
-                    target=self.targets[task],
+                    target=None,
                     base_adapt_kwargs=self.base_adapt_kwargs)
                 for i, task in enumerate(tasks)])
 
             # initialize gradients
-            optimizer.zero_grad()
-            for p in orig_model.parameters():
-                p.grad = torch.zeros_like(p).to(device)
+            # optimizer.zero_grad()
+            # for p in orig_model.parameters():
+            #     p.grad = torch.zeros_like(p).to(device)
 
             # sum up gradients and store metrics
-            for gradients, metrics, _ in results:
+            for i, orig_p in enumerate(orig_model.parameters()):
+                mean_p = sum(res[0][i] for res in results) / self.task_batch_size
+                # weights = weights_before + lr*(weights_after - weights_before)  <--- grad
+                # weights = weights_before + lr*grad
+                # optimizer: weights = weights_before - lr*grad
+                # optimizer: weights = weights_before + lr*(-grad)
+                # optimizer: weights = weights_before + lr*(weights_before - weights_after)
+                orig_p.grad = orig_p.data - mean_p
+
+            for _, metrics, _ in results:
                 metric_store.add(metrics)
-                for orig_p, grad in zip(orig_model.parameters(), gradients):
-                    orig_p.grad += grad / self.task_batch_size
 
             # apply gradients
             optimizer.step()

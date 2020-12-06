@@ -51,6 +51,8 @@ class CustomPolicy(MlpPolicy):
 if __name__ == "__main__":
 
     sys.stdout = open("outputs.txt", "w")
+    seed = 12345
+    torch.manual_seed(seed)
 
     # Args
     args = parse_arguments()
@@ -82,12 +84,12 @@ if __name__ == "__main__":
     #     Step with summed gradients
 
     # PPO Adaptation Parameters
-    episode_length = 200  # horizon H
+    episode_length = 400  # horizon H
     num_episodes = 5  # "K" in K-shot learning
     n_steps = num_episodes * episode_length
-    total_timesteps = 1 * n_steps  # number of "epochs"
-    n_epochs = 1
-    batch_size = None
+    total_timesteps = 5 * n_steps  # number of "epochs"
+    n_epochs = 2
+    batch_size = 64
     action_size = 3  # only control EE position
     manual_terminate = True
     penalize_illegal = True
@@ -100,7 +102,7 @@ if __name__ == "__main__":
     # MAML parameters
     num_iters = 400
     num_tasks = 10
-    task_batch_size = 8
+    task_batch_size = 1
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     alpha = 1e-3
     beta = 1e-3
