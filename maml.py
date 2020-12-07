@@ -19,6 +19,10 @@ from eval_utils import *
 import ray
 ray.init()
 
+MAML_ID = 0
+REPTILE_ID = 1
+
+
 AvgMetricStore = collections.namedtuple(
     'AvgMetricStore', ['reward', 'success_rate',
                        'entropy_loss', 'pg_loss', 'value_loss', 'loss'])
@@ -61,7 +65,7 @@ class MAML_Worker(object):
         self.base_init_kwargs = model_kwargs
 
     def perform_task_rollout(self, orig_model_state_dict, target,
-                             base_adapt_kwargs):
+                             base_adapt_kwargs, algo_type):
         # pick a task
         self.model.env.switch_task_wrapper(
             self.model.env, ReachTargetCustom, target_position=target)
@@ -73,13 +77,21 @@ class MAML_Worker(object):
 
         # train new model on K trajectories
         self.model.learn(**base_adapt_kwargs)
+
+        if algo_type == MAML_ID:
+            # collect new gradients for a one iteration
+            # (NOTE: not one trajectory like paper does, shouldn't make a difference)
+            # learn() already calls loss.backward()
+            self.model.learn(total_timesteps=1 *
+                             self.base_init_kwargs['n_steps'])
+
         metrics = [self.model.reward, self.model.success_rate, self.model.entropy_loss,
                    self.model.pg_loss, self.model.value_loss, self.model.loss]
 
-        # gradients = [p.grad.data for p in self.model.policy.parameters()]
+        gradients = [p.grad.data for p in self.model.policy.parameters()]
         parameters = [p.data for p in self.model.policy.parameters()]
 
-        return parameters, metrics
+        return gradients, parameters, metrics
 
     def sample_task(self):
         return self.model.env.reset()
@@ -153,7 +165,7 @@ class MAML(object):
         else:
             self.targets = targets
 
-    def learn(self, num_iters, save_kwargs):
+    def learn(self, algo_type, num_iters, save_kwargs):
         utils.configure_logger(
             self.base_init_kwargs["verbose"], save_kwargs["tensorboard_log"], "PPO")
 
@@ -180,7 +192,7 @@ class MAML(object):
         for iter in range(num_iters):
             # sample task_batch_size tasks from set of [0, num_task) tasks
             tasks = np.random.choice(
-                a=self.num_tasks, size=self.task_batch_size)
+                a=self.num_tasks, size=self.task_batch_size, replace=False)
 
             metric_store = MetricStore()
 
@@ -190,27 +202,35 @@ class MAML(object):
                 self.model_policy_vec[i].perform_task_rollout.remote(
                     orig_model_state_dict=orig_model_state_dict,
                     target=self.targets[task],
-                    base_adapt_kwargs=self.base_adapt_kwargs)
+                    base_adapt_kwargs=self.base_adapt_kwargs,
+                    algo_type=algo_type)
                 for i, task in enumerate(tasks)])
 
             # initialize gradients
-            # optimizer.zero_grad()
-            # for p in orig_model.parameters():
-            #     p.grad = torch.zeros_like(p).to(device)
+            if algo_type == MAML_ID:
+                optimizer.zero_grad()
+                for p in orig_model.parameters():
+                    p.grad = torch.zeros_like(p).to(device)
 
-            # sum up gradients and store metrics
-            for i, orig_p in enumerate(orig_model.parameters()):
-                mean_p = sum(res[0][i]
-                             for res in results) / self.task_batch_size
-                # weights = weights_before + lr*(weights_after - weights_before)  <--- grad
-                # weights = weights_before + lr*grad
-                # optimizer: weights = weights_before - lr*grad
-                # optimizer: weights = weights_before + lr*(-grad)
-                # optimizer: weights = weights_before + lr*(weights_before - weights_after)
-                orig_p.grad = orig_p.data - mean_p
+                # sum up gradients and store metrics
+                for gradients, _, metrics in results:
+                    metric_store.add(metrics)
+                    for orig_p, grad in zip(orig_model.parameters(), gradients):
+                        orig_p.grad += grad / self.task_batch_size
+            else:
+                # sum up gradients and store metrics
+                for i, orig_p in enumerate(orig_model.parameters()):
+                    mean_p = sum(res[1][i]
+                                 for res in results) / self.task_batch_size
+                    # weights = weights_before + lr*(weights_after - weights_before)  <--- grad
+                    # weights = weights_before + lr*grad
+                    # optimizer: weights = weights_before - lr*grad
+                    # optimizer: weights = weights_before + lr*(-grad)
+                    # optimizer: weights = weights_before + lr*(weights_before - weights_after)
+                    orig_p.grad = orig_p.data - mean_p
 
-            for _, metrics in results:
-                metric_store.add(metrics)
+                for _, metrics in results:
+                    metric_store.add(metrics)
 
             # apply gradients
             optimizer.step()

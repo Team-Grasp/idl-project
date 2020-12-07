@@ -19,7 +19,7 @@ from reach_task import ReachTargetCustom
 from grasp_env import GraspEnv
 from multitask_env import MultiTaskEnv
 
-from maml import MAML
+from maml import MAML, MAML_ID, REPTILE_ID
 
 from eval_utils import *
 
@@ -98,6 +98,7 @@ if __name__ == "__main__":
     save_freq = 10  # save model weights every save_freq iteration
 
     # MAML parameters
+    algo_type = MAML_ID
     num_iters = 100
     num_tasks = 10
     task_batch_size = 10
@@ -138,7 +139,8 @@ if __name__ == "__main__":
                      num_tasks=num_tasks, task_batch_size=task_batch_size, targets=train_targets,
                      alpha=alpha, beta=beta, model_path=model_path,
                      env_kwargs=env_kwargs, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
-        model.learn(num_iters=num_iters, save_kwargs=save_kwargs)
+        model.learn(algo_type=algo_type,
+                    num_iters=num_iters, save_kwargs=save_kwargs)
 
     else:
         render_mode = "human" if render else None
