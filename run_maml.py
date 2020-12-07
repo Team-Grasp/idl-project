@@ -3,6 +3,7 @@ import time
 import datetime
 import copy
 import sys
+import ipdb
 
 import torch
 
@@ -27,10 +28,7 @@ Train:
 python run_maml.py --train 
 
 Eval:
-python run_maml.py --eval --model_path=models/1607153777/110_iters.zip \
---train_targets_path=models/1607153777/targets.npy --test_targets_path=test_targets.npy
-
-
+python run_maml.py --eval --model_path=models/reptile_randomized_targets/320_iters.zip
 """
 
 
@@ -50,7 +48,7 @@ class CustomPolicy(MlpPolicy):
 
 if __name__ == "__main__":
 
-    sys.stdout = open("outputs.txt", "w")
+    # sys.stdout = open("outputs.txt", "w")
     seed = 12345
     torch.manual_seed(seed)
 
@@ -84,10 +82,10 @@ if __name__ == "__main__":
     #     Step with summed gradients
 
     # PPO Adaptation Parameters
-    episode_length = 400  # horizon H
+    episode_length = 200  # horizon H
     num_episodes = 5  # "K" in K-shot learning
     n_steps = num_episodes * episode_length
-    total_timesteps = 5 * n_steps  # number of "epochs"
+    total_timesteps = 1 * n_steps  # number of "epochs"
     n_epochs = 2
     batch_size = 64
     action_size = 3  # only control EE position
@@ -100,9 +98,9 @@ if __name__ == "__main__":
     save_freq = 10  # save model weights every save_freq iteration
 
     # MAML parameters
-    num_iters = 400
+    num_iters = 100
     num_tasks = 10
-    task_batch_size = 1
+    task_batch_size = 10
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     alpha = 1e-3
     beta = 1e-3
@@ -134,29 +132,64 @@ if __name__ == "__main__":
         print("Failed to load test_targets, auto-generating new ones due to %s" % e)
         test_targets = None
 
-    # create maml class that spawns multiple agents and sim environments
-    model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv,
-                 num_tasks=num_tasks, task_batch_size=task_batch_size, targets=train_targets,
-                 alpha=alpha, beta=beta, model_path=model_path,
-                 env_kwargs=env_kwargs, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
-
     if is_train:
+        # create maml class that spawns multiple agents and sim environments
+        model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv,
+                     num_tasks=num_tasks, task_batch_size=task_batch_size, targets=train_targets,
+                     alpha=alpha, beta=beta, model_path=model_path,
+                     env_kwargs=env_kwargs, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
         model.learn(num_iters=num_iters, save_kwargs=save_kwargs)
 
     else:
-        assert(test_targets is not None)
+        render_mode = "human" if render else None
+        random_model_path = ''  # NOTE: model_path initially not specified to use random weights
+        # create maml class that spawns multiple agents and sim environments
+        model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv,
+                     num_tasks=num_tasks, task_batch_size=task_batch_size, targets=train_targets,
+                     alpha=alpha, beta=beta, model_path=random_model_path,
+                     env_kwargs=env_kwargs, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
 
         # see performance on train tasks
-        pre_metrics, post_metrics = model.eval_performance(targets=None)
-        print("Train Results:")
-        print("pre_metrics", pre_metrics)
-        print("post_metrics", post_metrics)
+        assert(model.model_path == '')  # Testing randomly-initialized weights
+        rand_init_metrics = model.eval_performance(
+            model_type="random",
+            save_kwargs=save_kwargs,
+            num_iters=num_iters,
+            targets=test_targets)
+
+        rand_init_rewards = [v.reward for v in rand_init_metrics]
+        rand_init_success = [v.success_rate for v in rand_init_metrics]
+        rand_init_e_loss = [v.entropy_loss for v in rand_init_metrics]
+        rand_init_pg_loss = [v.pg_loss for v in rand_init_metrics]
+        rand_init_v_loss = [v.value_loss for v in rand_init_metrics]
+        rand_init_loss = [v.loss for v in rand_init_metrics]
 
         # see performance on test tasks
-        pre_metrics, post_metrics = model.eval_performance(
-            targets=test_targets)
-        print("Test Results:")
-        print("pre_metrics", pre_metrics)
-        print("post_metrics", post_metrics)
+        pretrained_metrics = model.eval_performance(
+            model_type="Reptile",  # "MAML", "RL^2"
+            save_kwargs=save_kwargs,
+            num_iters=num_iters,
+            targets=test_targets,
+            model_path=model_path)
+
+        pretrained_rewards = [v.reward for v in pretrained_metrics]
+        pretrained_success = [v.success_rate for v in pretrained_metrics]
+        pretrained_e_loss = [v.entropy_loss for v in pretrained_metrics]
+        pretrained_pg_loss = [v.pg_loss for v in pretrained_metrics]
+        pretrained_v_loss = [v.value_loss for v in pretrained_metrics]
+        pretrained_loss = [v.loss for v in pretrained_metrics]
+
+        np.savez("final_results_reptile",
+                 rand_init_rewards=rand_init_rewards,
+                 rand_init_success=rand_init_success,
+                 rand_init_e_loss=rand_init_e_loss,
+                 rand_init_pg_loss=rand_init_pg_loss,
+                 rand_init_v_loss=rand_init_v_loss,
+                 rand_init_loss=rand_init_loss,
+                 pretrained_rewards=pretrained_rewards,
+                 pretrained_success=pretrained_success,
+                 pretrained_e_loss=pretrained_e_loss,
+                 pretrained_v_loss=pretrained_v_loss,
+                 pretrained_loss=pretrained_loss,)
 
     model.close()

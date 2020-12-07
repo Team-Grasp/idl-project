@@ -163,7 +163,6 @@ class GraspEnv(gym.Env):
 
     def reset(self) -> Dict[str, np.ndarray]:
         descriptions, obs = self.task.reset()
-        print("RESET!")
         self.n_steps = 0
         del descriptions  # Not used.
         return self._extract_obs(obs)
@@ -244,18 +243,20 @@ class GraspEnv(gym.Env):
         # except Exception as e:
         #     print(e)
 
+        terminate = False
         try:
-            obs, reward, terminate = self.task.step(action)
+            obs, reward, success = self.task.step(action)
             obs = self._extract_obs(obs)
         except pyrep.errors.ConfigurationPathError as e:
             # print("Action %s failed due to %s" % (np.array2string(action, precision=3), e))
             obs = self._extract_obs(self.task._scene.get_observation())
-            _, terminate = self.task._task.success()
+            _, success = self.task._task.success()
             reward = self.task._task.reward()
             # scale reward by change in translation/rotation
         except rlbench.task_environment.InvalidActionError as e:
             # print("Action %s failed due to %s" % (np.array2string(action, precision=3), e))
             obs = self._extract_obs(self.task._scene.get_observation())
+            _, success = self.task._task.success()
             if self.penalize_illegal:
                 reward = -5
             else:
@@ -264,14 +265,15 @@ class GraspEnv(gym.Env):
             if self.manual_terminate:
                 terminate = True
                 self.reset()
-            else:
-                _, terminate = self.task._task.success()
 
         if self.n_steps > self.epsiode_length:
             self.reset()
             terminate = True
 
-        return obs, reward, terminate, {}
+        if success:
+            print("Reached Goal!")
+
+        return obs, reward, terminate or success, {'is_success': success}
 
     def close(self) -> None:
         self.env.shutdown()
