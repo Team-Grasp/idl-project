@@ -9,13 +9,17 @@ def parse_arguments():
                         default=10000, help="Number of episodes to train on.")
     parser.add_argument('--lr', dest='lr', type=float,
                         default=3e-4, help="The learning rate.")
+    parser.add_argument('--seed', dest='seed', type=int,
+                        help="Random seed.")
 
+    parser.add_argument('--algo_name', dest='algo_name', type=str,
+                        default="", help="Type of Algorithm to use. Select from [MAML, REPTILE, REPTILIAN_MAML]")
     parser.add_argument('--model_path', dest='model_path', type=str,
                         default="", help="Existing model to use.")
-    parser.add_argument('--train_targets_path', dest='train_targets_path', type=str,
-                        default="", help="Existing train_targets to use.")
-    parser.add_argument('--test_targets_path', dest='test_targets_path', type=str,
-                        default="", help="Existing test_targets to use.")
+    # parser.add_argument('--train_targets_path', dest='train_targets_path', type=str,
+    #                     default="", help="Existing train_targets to use.")
+    # parser.add_argument('--test_targets_path', dest='test_targets_path', type=str,
+    #                     default="", help="Existing test_targets to use.")
 
     # Mode
     parser_group = parser.add_mutually_exclusive_group(required=False)

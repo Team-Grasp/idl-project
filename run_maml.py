@@ -1,31 +1,32 @@
+from eval_utils import *
+from maml import (MAML,
+                  MAML_ID, REPTILE_ID, REPTILIAN_MAML_ID,
+                  ID_TO_NAME, NAME_TO_ID)
+from multitask_env import MultiTaskEnv
+from grasp_env import GraspEnv
+from reach_task import ReachTargetCustom
+from progress_callback import ProgressCallback
+from utils import parse_arguments
+from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.ppo.policies import MlpPolicy
+from stable_baselines3 import PPO, HER
+from rlbench.action_modes import ArmActionMode
+import torch
 import numpy as np
 import time
 import datetime
 import copy
 import sys
 import ipdb
+import wandb
+import random
+import ray
+ray.init()
 
-import torch
-
-from rlbench.action_modes import ArmActionMode
-
-from stable_baselines3 import PPO, HER
-from stable_baselines3.ppo.policies import MlpPolicy
-from stable_baselines3.common.evaluation import evaluate_policy
-from utils import parse_arguments
-from progress_callback import ProgressCallback
-
-from reach_task import ReachTargetCustom
-from grasp_env import GraspEnv
-from multitask_env import MultiTaskEnv
-
-from maml import MAML, MAML_ID, REPTILE_ID
-
-from eval_utils import *
 
 """Commands:
 Train:
-python run_maml.py --train 
+python run_maml.py --train
 
 Eval:
 python run_maml.py --eval --model_path=models/reptile_randomized_targets/320_iters.zip
@@ -49,16 +50,22 @@ class CustomPolicy(MlpPolicy):
 if __name__ == "__main__":
 
     # sys.stdout = open("outputs.txt", "w")
-    seed = 12345
-    torch.manual_seed(seed)
+    # seed = 12345
+    # seed = 320
+    # seed = 420  # lel
 
     # Args
     args = parse_arguments()
+    try:
+        random.seed(args.seed)       # python random seed
+        torch.manual_seed(args.seed)  # pytorch random seed
+        np.random.seed(args.seed)  # numpy random seed
+        torch.backends.cudnn.deterministic = True
+    except:
+        print("NEED TO SPECIFY RANDOM SEED with --seed")
     render = args.render
     is_train = args.train
     model_path = args.model_path
-    train_targets_path = args.train_targets_path
-    test_targets_path = args.test_targets_path
     num_episodes = args.num_episodes
     lr = args.lr
     # lr_scheduler = None
@@ -82,11 +89,11 @@ if __name__ == "__main__":
     #     Step with summed gradients
 
     # PPO Adaptation Parameters
-    episode_length = 200  # horizon H
-    num_episodes = 5  # "K" in K-shot learning
+    episode_length = 10  # horizon H
+    num_episodes = 1  # "K" in K-shot learning
     n_steps = num_episodes * episode_length
     total_timesteps = 1 * n_steps  # number of "epochs"
-    n_epochs = 2
+    n_epochs = 1
     batch_size = 64
     action_size = 3  # only control EE position
     manual_terminate = True
@@ -98,10 +105,12 @@ if __name__ == "__main__":
     save_freq = 10  # save model weights every save_freq iteration
 
     # MAML parameters
-    algo_type = MAML_ID
-    num_iters = 100
+    # MAML_ID, REPTILE_ID, REPTILIAN_MAML_ID
+    algo_name = args.algo_name.upper()
+    algo_type = NAME_TO_ID[algo_name]
+    num_iters = 1
     num_tasks = 10
-    task_batch_size = 10
+    task_batch_size = 8  # Reptile uses 1 during training automatically
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
     alpha = 1e-3
     beta = 1e-3
@@ -118,37 +127,40 @@ if __name__ == "__main__":
     save_kwargs = {'save_freq': save_freq,
                    'save_path': save_path, 'tensorboard_log': save_path, 'save_targets': save_targets}
 
+    # log results
+    config = {
+        "num_tasks": num_tasks,
+        "task_batch_size": task_batch_size,
+        "alpha": alpha,
+        "beta": beta,
+        "algo_name": algo_name,
+        "seed": args.seed,
+    }
+    run_title = "IDL - Train" if is_train else "IDL - Eval"
+    wandb.init(project=run_title, entity="idl-project", config=config)
+    wandb.save("maml.py")
+    wandb.save("run_maml.py")
+    wandb.save("multitask_env.py")
+    wandb.save("grasp_env.py")
+
     # load in targets
-    try:
-        train_targets = np.load(train_targets_path)
-        task_batch_size = min(task_batch_size, len(train_targets))
-        print("Loaded train targets from: %s" % train_targets_path)
-    except FileNotFoundError as e:
-        print("Failed to load train_targets, auto-generating new ones due to %s" % e)
-        train_targets = None
-    try:
-        test_targets = np.load(test_targets_path)
-        print("Loaded test targets from: %s" % test_targets_path)
-    except FileNotFoundError as e:
-        print("Failed to load test_targets, auto-generating new ones due to %s" % e)
-        test_targets = None
+    train_targets = MultiTaskEnv.targets
+    task_batch_size = min(task_batch_size, len(train_targets))
+    test_targets = MultiTaskEnv.test_targets
 
     if is_train:
         # create maml class that spawns multiple agents and sim environments
-        model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv,
+        model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv, algo_type=algo_type,
                      num_tasks=num_tasks, task_batch_size=task_batch_size, targets=train_targets,
                      alpha=alpha, beta=beta, model_path=model_path,
                      env_kwargs=env_kwargs, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
-        model.learn(algo_type=algo_type,
-                    num_iters=num_iters, save_kwargs=save_kwargs)
+        model.learn(num_iters=num_iters, save_kwargs=save_kwargs)
 
     else:
-        render_mode = "human" if render else None
-        random_model_path = ''  # NOTE: model_path initially not specified to use random weights
         # create maml class that spawns multiple agents and sim environments
-        model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv,
+        model = MAML(BaseAlgo=PPO, EnvClass=GraspEnv, algo_type=algo_type,
                      num_tasks=num_tasks, task_batch_size=task_batch_size, targets=train_targets,
-                     alpha=alpha, beta=beta, model_path=random_model_path,
+                     alpha=alpha, beta=beta, model_path='',  # <--- Empty path for random weights
                      env_kwargs=env_kwargs, base_init_kwargs=base_init_kwargs, base_adapt_kwargs=base_adapt_kwargs)
 
         # see performance on train tasks
@@ -168,7 +180,7 @@ if __name__ == "__main__":
 
         # see performance on test tasks
         pretrained_metrics = model.eval_performance(
-            model_type="Reptile",  # "MAML", "RL^2"
+            model_type=algo_name,  # "MAML", "RL^2"
             save_kwargs=save_kwargs,
             num_iters=num_iters,
             targets=test_targets,
@@ -181,7 +193,7 @@ if __name__ == "__main__":
         pretrained_v_loss = [v.value_loss for v in pretrained_metrics]
         pretrained_loss = [v.loss for v in pretrained_metrics]
 
-        np.savez("final_results_reptile",
+        np.savez(f"final_results_{algo_name}",
                  rand_init_rewards=rand_init_rewards,
                  rand_init_success=rand_init_success,
                  rand_init_e_loss=rand_init_e_loss,

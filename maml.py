@@ -17,15 +17,20 @@ from rlbench.backend.spawn_boundary import SpawnBoundary
 from eval_utils import *
 
 import ray
-ray.init()
 
 MAML_ID = 0
 REPTILE_ID = 1
+REPTILIAN_MAML_ID = 2  # batched version of Reptile
+ID_TO_NAME = {MAML_ID: "MAML", REPTILE_ID: "REPTILE",
+              REPTILIAN_MAML_ID: "REPTILIAN_MAML"}
+NAME_TO_ID = dict((v, k) for k, v in ID_TO_NAME.items())
 
 
 AvgMetricStore = collections.namedtuple(
     'AvgMetricStore', ['reward', 'success_rate',
                        'entropy_loss', 'pg_loss', 'value_loss', 'loss'])
+RolloutResults = collections.namedtuple(
+    'RolloutResults', ['gradients', 'parameters', 'metrics'])
 
 
 class MetricStore(object):
@@ -65,7 +70,7 @@ class MAML_Worker(object):
         self.base_init_kwargs = model_kwargs
 
     def perform_task_rollout(self, orig_model_state_dict, target,
-                             base_adapt_kwargs, algo_type):
+                             base_adapt_kwargs, algo_type=None):
         # pick a task
         self.model.env.switch_task_wrapper(
             self.model.env, ReachTargetCustom, target_position=target)
@@ -91,7 +96,7 @@ class MAML_Worker(object):
         gradients = [p.grad.data for p in self.model.policy.parameters()]
         parameters = [p.data for p in self.model.policy.parameters()]
 
-        return gradients, parameters, metrics
+        return RolloutResults(gradients=gradients, parameters=parameters, metrics=metrics)
 
     def sample_task(self):
         return self.model.env.reset()
@@ -119,7 +124,7 @@ class MAML_Worker(object):
 class MAML(object):
     BASE_ID = 0
 
-    def __init__(self, BaseAlgo: BaseAlgorithm, EnvClass, num_tasks, task_batch_size,
+    def __init__(self, BaseAlgo: BaseAlgorithm, EnvClass, algo_type, num_tasks, task_batch_size,
                  alpha, beta, model_path, env_kwargs, base_init_kwargs, base_adapt_kwargs, targets=None):
         """
             BaseAlgo:
@@ -128,6 +133,7 @@ class MAML(object):
             Task-Agnostic because loss function defined by Advantage = Reward - Value function.
 
         """
+        self.algo_type = algo_type
         self.num_tasks = num_tasks
         self.task_batch_size = task_batch_size
 
@@ -165,19 +171,18 @@ class MAML(object):
         else:
             self.targets = targets
 
-    def learn(self, algo_type, num_iters, save_kwargs):
+    def learn(self, num_iters, save_kwargs):
         utils.configure_logger(
             self.base_init_kwargs["verbose"], save_kwargs["tensorboard_log"], "PPO")
 
-        # log training results
-        wandb.init(project="IDL - MAML - Train", entity="idl-project")
-        config = {
-            "num_tasks": self.num_tasks,
-            "task_batch_size": self.task_batch_size,
-            "alpha": self.alpha,
-            "beta": self.beta
-        }
-        wandb.config = config
+        if self.algo_type == REPTILE_ID:
+            # Reptile only samples one task at a time and performs SGD on that one task
+            # then uses the updated weights to update current weights
+            task_batch_size = 1
+        else:
+            # Our modification performs a batch update using multiple tasks, in essence
+            # batch gradient update, linearity of gradients makes this possible
+            task_batch_size = self.task_batch_size
 
         if save_kwargs["save_targets"]:
             target_path = os.path.join(save_kwargs["save_path"], "targets")
@@ -192,52 +197,52 @@ class MAML(object):
         for iter in range(num_iters):
             # sample task_batch_size tasks from set of [0, num_task) tasks
             tasks = np.random.choice(
-                a=self.num_tasks, size=self.task_batch_size, replace=False)
+                a=self.num_tasks, size=task_batch_size, replace=False)
 
             metric_store = MetricStore()
 
-            # run multiple MAML task rollouts in parallel
+            # run multiple task rollouts in parallel
             orig_model_state_dict = orig_model.state_dict()
             results = ray.get([
                 self.model_policy_vec[i].perform_task_rollout.remote(
                     orig_model_state_dict=orig_model_state_dict,
                     target=self.targets[task],
                     base_adapt_kwargs=self.base_adapt_kwargs,
-                    algo_type=algo_type)
+                    algo_type=self.algo_type)
                 for i, task in enumerate(tasks)])
 
             # initialize gradients
-            if algo_type == MAML_ID:
+            if self.algo_type == MAML_ID:
                 optimizer.zero_grad()
                 for p in orig_model.parameters():
                     p.grad = torch.zeros_like(p).to(device)
 
                 # sum up gradients and store metrics
-                for gradients, _, metrics in results:
-                    metric_store.add(metrics)
-                    for orig_p, grad in zip(orig_model.parameters(), gradients):
-                        orig_p.grad += grad / self.task_batch_size
-            else:
+                for res in results:
+                    for orig_p, grad in zip(orig_model.parameters(), res.gradients):
+                        orig_p.grad += grad / task_batch_size
+
+            else:  # REPTILE, REPTILIAN_MAML
                 # sum up gradients and store metrics
                 for i, orig_p in enumerate(orig_model.parameters()):
-                    mean_p = sum(res[1][i]
-                                 for res in results) / self.task_batch_size
+                    mean_p = sum(res.parameters[i]
+                                 for res in results) / task_batch_size
                     # weights = weights_before + lr*(weights_after - weights_before)  <--- grad
                     # weights = weights_before + lr*grad
-                    # optimizer: weights = weights_before - lr*grad
+                    # optimizer: weights = weights_before - lr*grad  <--- gradient DESCENT
                     # optimizer: weights = weights_before + lr*(-grad)
                     # optimizer: weights = weights_before + lr*(weights_before - weights_after)
                     orig_p.grad = orig_p.data - mean_p
 
-                for _, metrics in results:
-                    metric_store.add(metrics)
+            for res in results:
+                metric_store.add(res.metrics)
 
             # apply gradients
             optimizer.step()
 
             # track performance
             (avg_reward, avg_success_rate, avg_entropy_loss, avg_pg_loss,
-                avg_val_loss, avg_loss) = metric_store.avg(self.task_batch_size)
+                avg_val_loss, avg_loss) = metric_store.avg(task_batch_size)
             wandb.log(
                 {
                     "mean_reward": avg_reward,
@@ -254,6 +259,7 @@ class MAML(object):
                 path = os.path.join(save_kwargs["save_path"], f"{iter}_iters")
                 self.model_policy_vec[self.BASE_ID].save.remote(
                     orig_model.state_dict(), path)
+                wandb.save(path)
 
     def eval_performance(self, model_type, save_kwargs, num_iters=100, targets=None, base_adapt_kwargs=None, model_path=''):
         """Used to compare speed in learning between randomly-initialized weights.
@@ -293,15 +299,6 @@ class MAML(object):
         assert base_adapt_kwargs['total_timesteps'] == self.base_init_kwargs["n_steps"], \
             "We need to collect mean reward and loss at each timestep or epoch, so this must be 1*n_steps!"
 
-        # log Results
-        wandb.init(project="IDL - MAML - Eval", entity="idl-project")
-        config = {
-            "num_tasks": num_tasks,
-            "task_batch_size": self.task_batch_size,
-            "alpha": self.alpha,
-            "beta": self.beta,
-            "model_type": model_type}
-        wandb.config = config
         utils.configure_logger(
             self.base_init_kwargs["verbose"], save_kwargs["tensorboard_log"], "PPO")
 
@@ -337,8 +334,8 @@ class MAML(object):
                 for i, target in enumerate(targets)])
 
             metric_store = MetricStore()
-            for _, metrics in results:
-                metric_store.add(metrics)
+            for res in results:
+                metric_store.add(res.metrics)
 
             # store metrics averaged over all test tasks
             all_metrics.append(metric_store.avg(num_tasks))
