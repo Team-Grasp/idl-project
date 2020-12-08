@@ -78,6 +78,8 @@ Next, train:
 ```sh
 $ cd idl-project
 $ python main.py --train --lr=3e-4
+OR
+$ python run_maml.py --train --seed <seed int> --algo_name <reptile or maml or reptilian_maml>
 ```
 
 The above command will produce two folders: 
@@ -92,6 +94,10 @@ The second folder will contain the tensorboard metrics that can visualized with 
 $ tensorboard --logdir runs/PPO_<id>
 ```
 
+# Evaluate Model performance
+```sh
+$ python run_maml.py --eval --seed <seed int> --algo_name <reptile or maml or reptilian_maml> --model_path <path to saved model>
+```
 
 # Run Trained model 
 ```sh
