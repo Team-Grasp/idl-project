@@ -132,9 +132,6 @@ if __name__ == "__main__":
     env_kwargs = {'task_class': ReachTargetCustom, 'act_mode': act_mode, "render_mode": render_mode,
                   'epsiode_length': episode_length, 'action_size': action_size,
                   'manual_terminate': manual_terminate, 'penalize_illegal': penalize_illegal}
-    save_path = "models/%d" % timestamp
-    save_kwargs = {'save_freq': save_freq,
-                   'save_path': save_path, 'tensorboard_log': save_path, 'save_targets': save_targets}
 
     # log results
     config = {
@@ -146,12 +143,18 @@ if __name__ == "__main__":
         "seed": args.seed,
     }
     run_title = "IDL - Train" if is_train else "IDL - Eval"
-    wandb.init(project=run_title, entity="idl-project", config=config)
+    run = wandb.init(project=run_title, entity="idl-project", config=config)
     wandb.save("maml.py")
     wandb.save("run_maml.py")
     wandb.save("multitask_env.py")
     wandb.save("grasp_env.py")
 
+    print("Run Name:", run.name)
+
+    save_path = "models/" + str(run.name)
+    save_kwargs = {'save_freq': save_freq,
+                   'save_path': save_path, 'tensorboard_log': save_path, 'save_targets': save_targets}
+    
     # load in targets
     train_targets = MultiTaskEnv.targets
     task_batch_size = min(task_batch_size, len(train_targets))
@@ -214,6 +217,7 @@ if __name__ == "__main__":
                  pretrained_success=pretrained_success,
                  pretrained_e_loss=pretrained_e_loss,
                  pretrained_v_loss=pretrained_v_loss,
-                 pretrained_loss=pretrained_loss,)
+                 pretrained_loss=pretrained_loss,
+                 )
 
     model.close()
