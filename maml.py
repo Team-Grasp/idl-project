@@ -129,7 +129,7 @@ class MAML_Worker(object):
         done = False
         obs = self.env.reset()
         
-        self.model.eval()
+        self.model.policy.eval()
         
         episode_rewards = []
         i = 0
@@ -158,13 +158,6 @@ class MAML_Worker(object):
         mean_reward = np.mean(all_episode_rewards)
         std_reward = np.std(all_episode_rewards)
         success_rate = sum(success)/len(success)
-
-        wandb.log(
-                {
-                    "mean_reward_eval": mean_reward,
-                    "std_reward_eval": std_reward,
-                    "success_rate_eval": success_rate,
-                })
 
         return mean_reward, std_reward, success_rate
 
@@ -374,7 +367,10 @@ class MAML(object):
                 for i in other_workers]
 
         all_metrics = []
-
+        avg_mean_reward_eval_all = []
+        avg_std_reward_eval_all = []
+        avg_success_rate_eval_all = []
+        
         # for num_iters, observe how fast this set of initialized weights can learn each specific task
         for iter in range(num_iters):
             # for each batch of test tasks
@@ -408,7 +404,30 @@ class MAML(object):
             )
 
             if iter % self.eval_freq == 0:
-                [worker.evaluate.remote() for worker in self.model_policy_vec]
+                results_eval = ray.get(
+                    [worker.evaluate.remote() for worker in self.model_policy_vec]
+                )
+                all_mean_rewards = [result[0] for result in results_eval]
+                all_std_rewards = [result[1] for result in results_eval]
+                all_success_rate = [result[2] for result in results_eval]
+
+                avg_mean_reward_eval = sum(all_mean_rewards)/ len(all_mean_rewards)
+                avg_std_reward_eval = sum(all_std_rewards)/ len(all_std_rewards)
+                avg_success_rate_eval = sum(all_success_rate)/ len(all_success_rate)
+
+                avg_mean_reward_eval_all.append(avg_mean_reward_eval)
+                avg_std_reward_eval_all.append(avg_std_reward_eval)
+                avg_success_rate_eval_all.append(avg_success_rate_eval)
+
+                log_obj = {
+                    "mean_reward_eval": avg_mean_reward_eval,
+                    "std_reward_eval": avg_std_reward_eval,
+                    "success_rate_eval": avg_success_rate_eval,
+                }
+                
+                print(log_obj)
+                wandb.log(log_obj)
+                
 
             # save weights every save_freq and at the end
             if (iter > 0 and iter % save_kwargs["save_freq"] == 0) or iter == num_iters-1:
@@ -416,6 +435,14 @@ class MAML(object):
                     save_kwargs["save_path"], f"{model_type}_{iter}_iters")
                 self.model_policy_vec[self.BASE_ID].save.remote(None, path)
                 wandb.save(path+".zip")
+                print(path)
+
+        # save the final metrics
+        np.savez(f"eval_results_{model_type}", 
+            avg_mean_reward_eval_all=avg_mean_reward_eval_all,
+            avg_std_reward_eval_all=avg_std_reward_eval_all,
+            avg_success_rate_eval_all=avg_success_rate_eval_all,
+        )
 
         return all_metrics
 
