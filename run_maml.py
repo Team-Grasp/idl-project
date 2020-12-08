@@ -92,9 +92,21 @@ if __name__ == "__main__":
     episode_length = 200  # horizon H
     num_episodes = 5  # "K" in K-shot learning
     n_steps = num_episodes * episode_length
-    total_timesteps = 1 * n_steps  # number of "epochs"
     n_epochs = 2
     batch_size = 64
+    num_iters = 300
+
+    algo_name = args.algo_name.upper()
+    algo_type = NAME_TO_ID[algo_name]
+    
+    if (algo_type == MAML_ID):
+        num_iters = num_iters * batch_size * num_episodes * n_epochs
+        episode_length = 200
+        num_episodes = 1
+        batch_size = None
+        n_epochs = 1
+    
+    total_timesteps = 1 * n_steps  # number of "epochs"
     action_size = 3  # only control EE position
     manual_terminate = True
     penalize_illegal = True
@@ -102,13 +114,10 @@ if __name__ == "__main__":
     # Logistical parameters
     verbose = 1
     save_targets = True  # save the train targets (loaded or generated)
-    save_freq = 10  # save model weights every save_freq iteration
+    save_freq = 1  # save model weights every save_freq iteration
 
     # MAML parameters
     # MAML_ID, REPTILE_ID, REPTILIAN_MAML_ID
-    algo_name = args.algo_name.upper()
-    algo_type = NAME_TO_ID[algo_name]
-    num_iters = 300
     num_tasks = 10
     task_batch_size = 8  # Reptile uses 1 during training automatically
     act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
@@ -118,7 +127,7 @@ if __name__ == "__main__":
     ent_coef = 0.01
     base_init_kwargs = {'policy': CustomPolicy, 'n_steps': n_steps, 'n_epochs': n_epochs, 'learning_rate': alpha,
                         'batch_size': batch_size, 'verbose': verbose, 'vf_coef': vf_coef, 'ent_coef': ent_coef}
-    base_adapt_kwargs = {'total_timesteps': total_timesteps}
+    base_adapt_kwargs = {'total_timesteps': total_timesteps, "n_steps": n_steps}
     render_mode = "human" if render else None
     env_kwargs = {'task_class': ReachTargetCustom, 'act_mode': act_mode, "render_mode": render_mode,
                   'epsiode_length': episode_length, 'action_size': action_size,
@@ -179,6 +188,7 @@ if __name__ == "__main__":
         rand_init_loss = [v.loss for v in rand_init_metrics]
 
         # see performance on test tasks
+        assert model_path != "" # maml or reptile
         pretrained_metrics = model.eval_performance(
             model_type=algo_name,  # "MAML", "RL^2"
             save_kwargs=save_kwargs,

@@ -14,7 +14,6 @@ from stable_baselines3.common import logger, utils
 from reach_task import ReachTargetCustom
 from rlbench.backend.spawn_boundary import SpawnBoundary
 
-from eval_utils import *
 
 import ray
 
@@ -71,6 +70,9 @@ class MAML_Worker(object):
 
     def perform_task_rollout(self, orig_model_state_dict, target,
                              base_adapt_kwargs, algo_type=None):
+
+        self.model.policy.train()
+
         # pick a task
         self.model.env.switch_task_wrapper(
             self.model.env, ReachTargetCustom, target_position=target)
@@ -80,6 +82,9 @@ class MAML_Worker(object):
         if orig_model_state_dict is not None:
             self.model.policy.load_state_dict(orig_model_state_dict)
 
+        if "n_steps" in base_adapt_kwargs:
+            del base_adapt_kwargs['n_steps']
+        
         # train new model on K trajectories
         self.model.learn(**base_adapt_kwargs)
 
@@ -120,12 +125,56 @@ class MAML_Worker(object):
     def close(self):
         self.env.close()
 
+    def run_eval_eposide(self, max_iters=200):
+        done = False
+        obs = self.env.reset()
+        
+        self.model.eval()
+        
+        episode_rewards = []
+        i = 0
+        with torch.no_grad():
+            while not done and i < max_iters:
+                action, _states = self.model.predict(obs)
+                obs, reward, done, desc = self.env.step(action)
+                episode_rewards.append(reward)
+                i += 1
+                    
+        final_done = desc["is_success"]
+
+        return episode_rewards, final_done
+    
+    def evaluate(self, num_episodes=5):
+
+        all_episode_rewards = []
+        success = []
+
+        for i in range(num_episodes):
+            episode_rewards, final_done = self.run_eval_eposide()
+            total_reward = sum(episode_rewards)
+            all_episode_rewards.append(total_reward)
+            success.append(final_done)
+
+        mean_reward = np.mean(all_episode_rewards)
+        std_reward = np.std(all_episode_rewards)
+        success_rate = sum(success)/len(success)
+
+        wandb.log(
+                {
+                    "mean_reward_eval": mean_reward,
+                    "std_reward_eval": std_reward,
+                    "success_rate_eval": success_rate,
+                })
+
+        return mean_reward, std_reward, success_rate
+
+
 
 class MAML(object):
     BASE_ID = 0
 
     def __init__(self, BaseAlgo: BaseAlgorithm, EnvClass, algo_type, num_tasks, task_batch_size,
-                 alpha, beta, model_path, env_kwargs, base_init_kwargs, base_adapt_kwargs, targets=None):
+                 alpha, beta, model_path, env_kwargs, base_init_kwargs, base_adapt_kwargs, eval_freq=1,targets=None):
         """
             BaseAlgo:
             task_envs: [GraspEnv, ...]
@@ -136,6 +185,7 @@ class MAML(object):
         self.algo_type = algo_type
         self.num_tasks = num_tasks
         self.task_batch_size = task_batch_size
+        self.eval_freq = eval_freq
 
         # learning hyperparameters
         self.alpha = alpha
@@ -259,7 +309,7 @@ class MAML(object):
                 path = os.path.join(save_kwargs["save_path"], f"{iter}_iters")
                 self.model_policy_vec[self.BASE_ID].save.remote(
                     orig_model.state_dict(), path)
-                wandb.save(path)
+                wandb.save(path+".zip")
 
     def eval_performance(self, model_type, save_kwargs, num_iters=100, targets=None, base_adapt_kwargs=None, model_path=''):
         """Used to compare speed in learning between randomly-initialized weights.
@@ -295,6 +345,8 @@ class MAML(object):
             print("No PPO train args specified. Using default:")
             print(self.base_adapt_kwargs)
             base_adapt_kwargs = self.base_adapt_kwargs
+        
+        base_adapt_kwargs['total_timesteps'] = 1 * base_adapt_kwargs['n_steps']
 
         assert base_adapt_kwargs['total_timesteps'] == self.base_init_kwargs["n_steps"], \
             "We need to collect mean reward and loss at each timestep or epoch, so this must be 1*n_steps!"
@@ -330,6 +382,7 @@ class MAML(object):
                 self.model_policy_vec[i].perform_task_rollout.remote(
                     orig_model_state_dict=None,  # keep training existing model
                     target=target,
+                    algo_type=None,
                     base_adapt_kwargs=base_adapt_kwargs)
                 for i, target in enumerate(targets)])
 
@@ -354,11 +407,15 @@ class MAML(object):
                 }
             )
 
+            if iter % self.eval_freq == 0:
+                [worker.evaluate.remote() for worker in self.model_policy_vec]
+
             # save weights every save_freq and at the end
             if (iter > 0 and iter % save_kwargs["save_freq"] == 0) or iter == num_iters-1:
                 path = os.path.join(
                     save_kwargs["save_path"], f"{model_type}_{iter}_iters")
                 self.model_policy_vec[self.BASE_ID].save.remote(None, path)
+                wandb.save(path+".zip")
 
         return all_metrics
 
