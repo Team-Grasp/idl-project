@@ -19,7 +19,7 @@ class ReachTargetCustom(ReachTarget):
 
     def reward(self) -> float:
         dist = self.target.get_position(self.robot.arm.get_tip())
-        dist_val = np.linalg.norm(dist) / 5.0
+        dist_val = np.linalg.norm(dist) / 10.0
         return -dist_val
 
     def init_episode(self, index: int) -> List[str]:

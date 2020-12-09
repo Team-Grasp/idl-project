@@ -164,7 +164,7 @@ class GraspEnv(gym.Env):
 
         # position
         d_pos = np.array([ax, ay, az])
-        d_pos /= (np.linalg.norm(d_pos) * 200.0)
+        d_pos /= (np.linalg.norm(d_pos) * 100.0)
 
         # orientation
         d_quat = np.array([0, 0, 0, 1.0])
@@ -190,7 +190,7 @@ class GraspEnv(gym.Env):
             _, success = self.task._task.success()
 
             if self.penalize_illegal:
-                reward = -10
+                reward = -5
             else:
                 reward = self.task._task.reward()
 
@@ -204,7 +204,7 @@ class GraspEnv(gym.Env):
 
         if success: 
             print("Reached the Goal!")
-            reward = 10
+            # reward = 10
 
         if terminate:
             print("Couldn't reach the Goal")
