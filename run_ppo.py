@@ -16,8 +16,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--algo_name', dest='algo_name', type=str,
                         required=True, help="algo_name for logging")
 
-parser.add_argument('--is_train', dest='is_train',
-                        action='store_true',required=True, help="Training mode On")
+parser.add_argument('--train', dest='is_train',
+                        action='store_true', help="Training mode On")
 
 parser.add_argument('--model_path', dest='model_path', type=str,
                         default="", help="Existing model to use.")
@@ -41,34 +41,39 @@ render_mode = "human" if render else None
 base_path = "./models/" + algo_name + "/"
 is_wandb = True
 
-
-lr = 3e-4
-episode_length = 200  # horizon H
-num_episodes = 5  # "K" in K-shot learning
-n_steps = num_episodes * episode_length
-n_epochs = 2
-batch_size = 64
-num_iters = 300
-
-total_timesteps = 1 * n_steps  # number of "epochs"
 action_size = 3  # only control EE position
 manual_terminate = True
 penalize_illegal = True
+act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
 
 verbose = 1
 save_targets = True  # save the train targets (loaded or generated)
 save_freq = 1  # save model weights every save_freq iteration
 eval_freq = 1 
 
-num_tasks = 10
+lr = 3e-4
+
+n_epochs = 2
+num_episodes = 5  # "K" in K-shot learning
+batch_size = 64
+num_iters = 300
+episode_length = 200  # horizon H
+n_steps = num_episodes * episode_length
+total_timesteps = 1 * n_steps  # number of "epochs"
+
 task_batch_size = 1
+num_tasks = 2
+num_workers = task_batch_size
+
 alpha = 1e-3
 beta = 1e-3
 vf_coef = 0.5
 ent_coef = 0.01
-num_workers = task_batch_size
 
-act_mode = ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME
+if is_train:
+    max_tasks = len(MultiTaskEnv.train_targets)
+else:
+    max_tasks = len(MultiTaskEnv.test_targets)
 
 # Checks
 assert num_workers == task_batch_size
@@ -102,6 +107,8 @@ config = {
     "model_path": model_path,
     "num_iters": num_iters,
     'is_wandb': is_wandb,
+    'max_tasks': max_tasks,
+
     'policy': CustomPolicy, 
     'task_class': ReachTargetCustom, 
     "worker_class": PPOWorker,
@@ -116,24 +123,19 @@ torch.backends.cudnn.deterministic = True
 if is_wandb:
     run_title = f"idl-{algo_name}-" + "train" if is_train else "eval"
     run = wandb.init(project=run_title, entity="idl-project", config=config)
-    print(run.name)
+    print("Run Name: ", run.name)
     base_path = base_path + str(run.name) + "/"
     config["base_path"] = base_path
     wandb.save("algo/ppo_helpers.py")
     
-import time
-
 agent = PPOWorkerHandler(config, **config)
 
-new_tasks = [0]
-agent.set_task(new_tasks=new_tasks)
-
 if is_train:
-    
-# agent.evaluate(num_episodes=1, max_iters=200)
-
-agent.learn(config, **config)
+    agent.learn(config, **config)
+else:
+    agent.set_random_tasks()
+    # agent.sample_random_tasks()
+    agent.evaluate(num_episodes=1, max_iters=200)
 
 agent.close()
-
 

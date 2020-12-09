@@ -14,7 +14,7 @@ from env.reach_task import ReachTargetCustom
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--algo_name', dest='algo_name', type=str,
-                        required=True, help="algo_name for logging")
+                        required=False, default="ppo", help="algo_name for logging")
 
 parser.add_argument('--train', dest='is_train',
                         action='store_true', help="Training mode On")
@@ -39,7 +39,7 @@ algo_name = args.algo_name
 
 render_mode = "human" if render else None
 base_path = "./models/" + algo_name + "/"
-is_wandb = True
+is_wandb = False
 
 action_size = 3  # only control EE position
 manual_terminate = True
@@ -128,7 +128,7 @@ if is_wandb:
     config["base_path"] = base_path
     wandb.save("algo/ppo_helpers.py")
     
-import time
+# import time
 
 agent = PPOWorkerHandler(config, **config)
 
@@ -137,7 +137,7 @@ if is_train:
 else:
     agent.set_random_tasks()
     # agent.sample_random_tasks()
-    agent.evaluate(num_episodes=1, max_iters=200)
+    agent.evaluate(num_episodes=3, max_iters=200)
 
 # for i in range(10):
 #     new_tasks = [i]

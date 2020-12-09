@@ -209,7 +209,7 @@ class GraspEnv(gym.Env):
         if terminate:
             print("Couldn't reach the Goal")
 
-        print(reward)
+        # print(reward)
         return obs, reward, terminate or success, {'is_success': success}
 
     def close(self) -> None:
