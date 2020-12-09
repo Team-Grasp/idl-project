@@ -237,6 +237,16 @@ class MAML(object):
         optimizer = torch.optim.Adam(orig_model.parameters(), lr=self.beta)
         # lr_scheduler = torch.
 
+        import wandb
+        wandb.init(project="IDL - MAML")
+        config ={
+            "num_tasks":self.num_tasks,
+            "task_batch_size":self.task_batch_size,
+            "alpha":self.alpha,
+            "beta": self.beta
+        }
+        wandb.config = config
+
         for iter in range(num_iters):
             # sample task_batch_size tasks from set of [0, num_task) tasks
             tasks = np.random.choice(
