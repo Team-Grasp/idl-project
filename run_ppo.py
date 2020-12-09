@@ -61,8 +61,8 @@ episode_length = 200  # horizon H
 n_steps = num_episodes * episode_length
 total_timesteps = 1 * n_steps  # number of "epochs"
 
-task_batch_size = 1
-num_tasks = 2
+task_batch_size = 5
+num_tasks = 5
 num_workers = task_batch_size
 
 alpha = 1e-3
