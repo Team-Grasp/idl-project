@@ -164,7 +164,7 @@ class GraspEnv(gym.Env):
 
         # position
         d_pos = np.array([ax, ay, az])
-        d_pos /= (np.linalg.norm(d_pos) * 100.0)
+        d_pos /= (np.linalg.norm(d_pos) * 200.0)
 
         # orientation
         d_quat = np.array([0, 0, 0, 1.0])
@@ -185,12 +185,7 @@ class GraspEnv(gym.Env):
             obs, reward, success = self.task.step(action)
             obs = self._extract_obs(obs)
 
-        except pyrep.errors.ConfigurationPathError as e:
-            obs = self._extract_obs(self.task._scene.get_observation())
-            _, success = self.task._task.success()
-            reward = self.task._task.reward()
-
-        except rlbench.task_environment.InvalidActionError as e:
+        except (pyrep.errors.ConfigurationPathError, rlbench.task_environment.InvalidActionError) as e:
             obs = self._extract_obs(self.task._scene.get_observation())
             _, success = self.task._task.success()
 
@@ -214,6 +209,7 @@ class GraspEnv(gym.Env):
         if terminate:
             print("Couldn't reach the Goal")
 
+        print(reward)
         return obs, reward, terminate or success, {'is_success': success}
 
     def close(self) -> None:

@@ -29,14 +29,14 @@ class MultiTaskEnv(GraspEnv):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def set_task(self, task_num=None, is_train=True):
+    def set_task(self, task_num=None, is_train_tasks=True):
         
         self.task = self.env.get_task(self.task_class)
 
         if task_num is None:
             self.task._task.target_position = None
         
-        elif is_train:
+        elif is_train_tasks:
             assert task_num < len(self.train_targets), "Task requested is grater than total tasks available"
             self.task._task.target_position = self.train_targets[task_num]
         else:

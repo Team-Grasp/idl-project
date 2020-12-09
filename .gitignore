@@ -1,6 +1,7 @@
-__pycache__
-.vscode
-runs/
-models/
-evals/
+.vscode/
 wandb/
+models/
+runs/
+evals/
+
+__pycache__

@@ -1,4 +1,38 @@
 import argparse
+import collections
+
+AvgMetricStore = collections.namedtuple(
+    'AvgMetricStore', ['reward', 'success_rate',
+                       'entropy_loss', 'pg_loss', 'value_loss', 'loss'])
+RolloutResults = collections.namedtuple(
+    'RolloutResults', ['gradients', 'parameters', 'metrics'])
+
+class MetricStore(object):
+    def __init__(self):
+        self.total_reward = 0.0
+        self.total_success_rate = 0.0
+        self.total_entropy_loss = 0.0
+        self.total_pg_loss = 0.0
+        self.total_value_loss = 0.0
+        self.total_loss = 0.0
+
+    def add(self, metrics):
+        reward, success_rate, entropy_loss, pg_loss, value_loss, loss = metrics
+        self.total_reward += reward
+        self.total_success_rate += success_rate
+        self.total_entropy_loss += entropy_loss
+        self.total_pg_loss += pg_loss
+        self.total_value_loss += value_loss
+        self.total_loss += loss
+
+    def avg(self, count):
+        count = float(count)
+        return AvgMetricStore(self.total_reward / count,
+                              self.total_success_rate / count,
+                              self.total_entropy_loss / count,
+                              self.total_pg_loss / count,
+                              self.total_value_loss / count,
+                              self.total_loss / count)
 
 
 def parse_arguments():

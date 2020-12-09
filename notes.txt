@@ -1,0 +1,20 @@
+python debug_ppo.py --render --model_path models/277_iters.zip --algo_name ppo --train 
+
+python debug_ppo.py --render --model_path models/277_iters.zip 
+
+python run_ppo.py 
+python test_maml.py
+python test_reptile.py
+python test_rept_maml.py
+
+python run_maml.py
+python run_reptile.py
+python run_rept_maml.py
+
+python run_rl2.py
+python test_rl2.py
+
+
+Async learn
+Async eval 
+
