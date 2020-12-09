@@ -1,7 +1,4 @@
 import gym
-from gym import spaces
-from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-
 import numpy as np
 
 class PointEnv(gym.Env):

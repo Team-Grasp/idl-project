@@ -19,16 +19,17 @@ class ReachTargetCustom(ReachTarget):
 
     def reward(self) -> float:
         dist = self.target.get_position(self.robot.arm.get_tip())
-        dist_val = np.linalg.norm(dist) / 10.0
-#         if dist_val < 0.1:
-#             return 1
+        dist_val = np.linalg.norm(dist) / 5.0
         return -dist_val
 
     def init_episode(self, index: int) -> List[str]:
-        super().init_episode(index)
+        desc = super().init_episode(index)
 
         if self.target_position is not None:
             self.target.set_position(self.target_position)
+        
+        print("Task reset, Target: ", self.target_position)
+        return desc
 
     def get_name(self):
         return "reach_target"

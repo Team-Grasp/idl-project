@@ -1,20 +1,16 @@
-from typing import Union, Dict, Tuple, List
-import ipdb
+from typing import Dict, List, Tuple, Union
 
 import gym
+import numpy as np
+import pyrep
+import rlbench
 from gym import spaces
 from pyrep.const import RenderMode
 from pyrep.objects.dummy import Dummy
 from pyrep.objects.vision_sensor import VisionSensor
+from rlbench.action_modes import ActionMode, ArmActionMode
 from rlbench.environment import Environment
-from rlbench.action_modes import ArmActionMode, ActionMode
 from rlbench.observation_config import ObservationConfig
-import rlbench
-import numpy as np
-from scipy.spatial.transform import Rotation as R
-from pyquaternion import Quaternion
-
-import pyrep
 
 
 class GraspEnv(gym.Env):
@@ -36,9 +32,9 @@ class GraspEnv(gym.Env):
         ArmActionMode.EE_POSE_PLAN_EE_FRAME
     ])
 
-    def __init__(self, task_class, act_mode=ArmActionMode.ABS_JOINT_VELOCITY, observation_mode='state',
+    def __init__(self, task_class, act_mode=ArmActionMode.DELTA_EE_POSE_PLAN_WORLD_FRAME, observation_mode='state',
                  render_mode: Union[None, str] = None, epsiode_length: int = 200, action_size: Union[None, int] = None,
-                 manual_terminate: bool = True, penalize_illegal: bool = True, action_range: float = 0.01):
+                 manual_terminate: bool = True, penalize_illegal: bool = True, action_range: float = 0.01, **_):
         self._observation_mode = observation_mode
         self._render_mode = render_mode
         self.action_range = action_range
@@ -62,9 +58,12 @@ class GraspEnv(gym.Env):
         self.manual_terminate = manual_terminate
         self.penalize_illegal = penalize_illegal
 
+        self.gripper_open = 0.0
+        self.gripper_close = 0.0
+
         desc, obs = self.task.reset()
 
-        print(desc)
+        print("Task Description: " , desc)
 
         if action_size is None:
             action_size = self.env.action_size
@@ -109,14 +108,14 @@ class GraspEnv(gym.Env):
         # low_dim_data = [] if obs.gripper_open is None else [[obs.gripper_open]]
         low_dim_data = []
         for data in [
+            obs.gripper_pose[:3],
+            obs.task_low_dim_state,  # target state
             #  obs.joint_velocities,
             #  obs.joint_positions,
             #  obs.joint_forces,
-            obs.gripper_pose[:3],
             # [obs.gripper_open],
             #  obs.gripper_joint_positions,
             #  obs.gripper_touch_forces,
-            obs.task_low_dim_state,  # target state
         ]:
             if data is not None:
                 low_dim_data.append(data)
@@ -146,25 +145,9 @@ class GraspEnv(gym.Env):
         if mode == 'rgb_array':
             return self._gym_cam.capture_rgb()
 
-    # : Union[List, None]):
-    def switch_task(self, task_class, target_position):
-        self.task = self.env.get_task(task_class)
-        self.task._task.target_position = target_position
-
-    @staticmethod
-    def switch_task_wrapper(self, task_class: rlbench.backend.task.Task,
-                            target_position):  # : Union[List, None] = None):
-        """Change current task by specifying desired task class. Task objects are randomly initialized.
-
-        Args:
-            task_class (rlbench.backend.task.Task): desired task class
-        """
-        self.envs[0].switch_task(task_class, target_position)
-
     def reset(self) -> Dict[str, np.ndarray]:
-        descriptions, obs = self.task.reset()
+        _, obs = self.task.reset()
         self.n_steps = 0
-        del descriptions  # Not used.
         return self._extract_obs(obs)
 
     def normalize_action(self, action: np.ndarray):
@@ -185,48 +168,8 @@ class GraspEnv(gym.Env):
 
         # orientation
         d_quat = np.array([0, 0, 0, 1.0])
-        # d_euler = action[3:6] / 10.0
-        # drho, dphi, dtheta = d_euler
-        # rot = R.from_euler("xyz", [drho, dphi, dtheta], degrees=True)
-        # d_quat = rot.as_quat()
-
-        # gripper_open = action[-1]
-        gripper_open = 1.0
-
-        if self.task._action_mode.arm in self.delta_ee_control_types:
-            action = np.concatenate([d_pos, d_quat, [gripper_open]])
-
-            # try:
-            #     joint_positions = self.task._robot.arm.solve_ik(
-            #         action[:3], quaternion=action[3:-1], relative_to=self.task._robot.arm.get_tip())
-            #     print("target joint positions: %s" % np.array2string(np.array(joint_positions), precision=2))
-            # except Exception as e:
-            #     print("Failed to get target joint posiitions due to %s" % str(e))
-
-        else:
-            new_pos = cur_pos + d_pos
-            new_quat = cur_ori
-            action = np.concatenate([new_pos, new_quat, [1.0]])
-
-        return action
-
-    def manual_step(self, action):
-        self.task._robot.arm.get_tip().set_pose(action[:-1])
-        success, terminate = self.task._task.success()
-        task_reward = self.task._task.reward()
-        obs = self._extract_obs(self.task._scene.get_observation())
-        return obs, task_reward, terminate
-
-    def select_only_position(self, action: np.ndarray, action_range: float):
-
-        # import ipdb; ipdb.set_trace()
-        action = np.clip(action, -action_range, action_range)
-
-        mask = np.zeros(action.shape)
-        mask[:3] = 1
-
-        action = action * mask
-        action[6] = 1
+        
+        action = np.concatenate([d_pos, d_quat, [self.gripper_close]])
 
         return action
 
@@ -237,28 +180,22 @@ class GraspEnv(gym.Env):
         if self.task._action_mode.arm in self.ee_control_types:
             action = self.normalize_action(action)
 
-        # try:
-        #     obs, reward, terminate = self.manual_step(action)
-        #     # self.task._scene.step()
-        # except Exception as e:
-        #     print(e)
-
         terminate = False
         try:
             obs, reward, success = self.task.step(action)
             obs = self._extract_obs(obs)
+
         except pyrep.errors.ConfigurationPathError as e:
-            # print("Action %s failed due to %s" % (np.array2string(action, precision=3), e))
             obs = self._extract_obs(self.task._scene.get_observation())
             _, success = self.task._task.success()
             reward = self.task._task.reward()
-            # scale reward by change in translation/rotation
+
         except rlbench.task_environment.InvalidActionError as e:
-            # print("Action %s failed due to %s" % (np.array2string(action, precision=3), e))
             obs = self._extract_obs(self.task._scene.get_observation())
             _, success = self.task._task.success()
+
             if self.penalize_illegal:
-                reward = -5
+                reward = -10
             else:
                 reward = self.task._task.reward()
 
@@ -270,8 +207,12 @@ class GraspEnv(gym.Env):
             self.reset()
             terminate = True
 
-        if success:
-            print("Reached Goal!")
+        if success: 
+            print("Reached the Goal!")
+            reward = 10
+
+        if terminate:
+            print("Couldn't reach the Goal")
 
         return obs, reward, terminate or success, {'is_success': success}
 
