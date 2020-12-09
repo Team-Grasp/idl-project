@@ -104,3 +104,26 @@ $ python run_maml.py --eval --seed <seed int> --algo_name <reptile or maml or re
 $ cd idl-project
 $ python main.py --render --eval --model_path <path to saved model>
 ```
+
+# Commands
+python run_ppo.py --render --model_path models/277_iters.zip --algo_name ppo --train 
+
+python debug_ppo.py --render --model_path models/277_iters.zip --algo_name ppo --train 
+
+
+python test_maml.py 
+    => python run_ppo.py --model_path models/maml_model.zip --algo_name maml 
+
+python test_reptile.py 
+    => python run_ppo.py --model_path models/reptile_model.zip --algo_name reptile 
+
+python test_rept_maml.py 
+    => python run_ppo.py --model_path models/rept_maml.zip --algo_name rept_maml 
+
+
+python run_maml.py --algo_name maml --train
+python run_reptile.py --algo_name reptile --train
+python run_rept_maml.py --algo_name rept_maml --train
+
+python run_rl2.py
+python test_rl2.py
